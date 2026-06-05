@@ -4,12 +4,6 @@ markov_cp_routines.py
 Reusable routines for likelihood-based prediction sets, original i-block
 conformal prediction, and CP+1 for discrete-state Markov chains.
 
-Design goals from the meeting:
-1. Do not hard-code the number of states.
-2. Do not hard-code the allowable transitions.
-3. Use an adjacency matrix as the single object that defines both.
-4. Keep the run/demo file separate from the helper-function/routine file.
-
 State labels are assumed to be 1, 2, ..., S, where
 S = number of rows/columns in the adjacency matrix.
 """
