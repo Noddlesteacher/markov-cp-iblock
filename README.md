@@ -5,7 +5,7 @@ Preliminary research code for Markov conformal prediction experiments. The repos
 - a likelihood-based prediction baseline;
 - the original i-block conformal prediction method;
 - a graph-constrained CP+1 variant;
-- simple demo examples for testing and discussion.
+- simple demo examples for testing and comparison.
 
 The core routines do not hard-code a specific graph. They take an adjacency matrix as input and infer the number of states with `adjacency.shape[0]`. State labels are assumed to be `1, 2, ..., S`.
 
