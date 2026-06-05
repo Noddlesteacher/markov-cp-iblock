@@ -57,7 +57,7 @@ def summarize_results(title: str, results: dict) -> None:
 # ---------------------------------------------------------------------
 
 def demo_three_state_fully_connected() -> None:
-    """Small abstract example requested by the meeting discussion."""
+    """Small abstract example with all transitions allowed."""
     adjacency = np.ones((3, 3), dtype=int)  # all transitions are allowed
     history = [1, 1, 2, 3, 1, 2]
     horizon = 2
@@ -110,8 +110,7 @@ def demo_sweden_like_short() -> None:
 def demo_sweden_like_long(save_plots: bool = True) -> None:
     """Long dominant-state history: many repeated state-1 observations.
 
-    The meeting suggestion was to first keep the horizon small, such as H = 3,
-    so that the code is easy to test while we work on the theory.
+    The horizon is kept small so that the example runs quickly.
     """
     history = [1] * 420
     horizon = 3
