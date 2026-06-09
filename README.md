@@ -23,7 +23,7 @@ markov-cp-iblock/
 
 ## Files
 
-- `markov_cp_routines.py`: reusable validation helpers, path enumeration, likelihood baseline, original i-block CP, CP+1, summaries, and plotting helpers.
+- `markov_cp_routines.py`: reusable validation helpers, path enumeration, likelihood baseline, original i-block CP, CP+1, and small summary helpers.
 - `run_demo.py`: user-facing demo script where you set the adjacency matrix, training history, forecast horizon, alpha level, permutation cap, and random seed.
 - `demo_outputs/`: generated demo plots. The folder is kept in Git with `.gitkeep`, but generated files inside it are ignored.
 
@@ -43,7 +43,7 @@ python -m pip install -r requirements.txt
 python run_demo.py
 ```
 
-The demo prints prediction-set summaries and saves state-composition plots for the longer Sweden-like example to `demo_outputs/`.
+The demo prints prediction-set summaries and saves state-composition plots for the longer four-state conflict-graph example to `demo_outputs/`.
 
 ## Included Demos
 
