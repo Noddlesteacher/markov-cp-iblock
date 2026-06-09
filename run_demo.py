@@ -1,32 +1,44 @@
 """
 run_demo.py
 
-Demo / run file for the Markov CP routines.
+Small demo file for the Markov CP routines.
 
-This is the file to edit when we want to quickly test a new training sequence,
-a new adjacency matrix, or a new forecast horizon. The helper functions and
-main methods are kept in markov_cp_routines.py.
+Edit this file to try a different adjacency matrix, training sequence,
+forecast horizon, alpha level, or permutation cap. The reusable algorithm
+functions are in markov_cp_routines.py.
 """
 
-from __future__ import annotations
-
+import os
+import random
 from pathlib import Path
 
+PROJECT_DIR = Path(__file__).resolve().parent
+DEMO_OUTPUT_DIR = PROJECT_DIR / "demo_outputs"
+MPL_CONFIG_DIR = DEMO_OUTPUT_DIR / ".matplotlib"
+FONT_CACHE_DIR = DEMO_OUTPUT_DIR / ".cache"
+
+MPL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+FONT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(MPL_CONFIG_DIR))
+os.environ.setdefault("XDG_CACHE_HOME", str(FONT_CACHE_DIR))
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 
 from markov_cp_routines import (
     block_p_value_for_candidate,
-    enumerate_paths,
-    iblock_cp_prediction_set,
-    likelihood_prediction_set,
-    plot_method_compositions,
+    generate_i_block_permutations,
     print_prediction_set_summary,
     run_all_methods,
+    split_i_blocks,
 )
 
 
 # ---------------------------------------------------------------------
-# Problem setup helpers
+# Example adjacency matrices
 # ---------------------------------------------------------------------
 
 CONFLICT_ADJACENCY = np.array(
@@ -40,128 +52,178 @@ CONFLICT_ADJACENCY = np.array(
 )
 
 
-def summarize_results(title: str, results: dict) -> None:
+FULLY_CONNECTED_THREE_STATE = np.ones((3, 3), dtype=int)
+
+
+# ---------------------------------------------------------------------
+# Small printing and plotting helpers for the demo
+# ---------------------------------------------------------------------
+
+def summarize_results(title, results):
     """Print a compact summary of all three methods."""
     print("\n" + "=" * 80)
     print(title)
     print("=" * 80)
-    print(f"horizon = {results['horizon']}, alpha = {results['alpha']}")
+    print(f"H = {results['horizon']}, alpha = {results['alpha']}")
     print(f"number of candidate paths = {len(results['candidate_paths'])}")
     print_prediction_set_summary("Likelihood baseline", results["likelihood"])
     print_prediction_set_summary("Original i-block CP", results["original_iblock"])
     print_prediction_set_summary("CP+1", results["cp_plus_one"])
 
 
+def plot_state_composition(composition, title, filename):
+    """Save a simple bar plot of state proportions across forecast steps."""
+    H, num_states = composition.shape
+    x = np.arange(H)
+    bottom = np.zeros(H)
+
+    plt.figure(figsize=(7, 4))
+
+    for state_index in range(num_states):
+        values = composition[:, state_index]
+        plt.bar(
+            x,
+            values,
+            bottom=bottom,
+            label=f"state {state_index + 1}",
+        )
+        bottom = bottom + values
+
+    plt.xticks(x, [f"t+{h + 1}" for h in range(H)])
+    plt.ylim(0, 1)
+    plt.ylabel("proportion")
+    plt.title(title)
+    plt.legend(loc="upper right")
+    plt.tight_layout()
+    plt.savefig(filename, dpi=150)
+    plt.close()
+
+
 # ---------------------------------------------------------------------
-# Demo 1: simple 3-state fully connected example
+# Demo 1: three-state fully connected graph
 # ---------------------------------------------------------------------
 
-def demo_three_state_fully_connected() -> None:
-    """Small abstract example with all transitions allowed."""
-    adjacency = np.ones((3, 3), dtype=int)  # all transitions are allowed
+def demo_three_state_fully_connected():
+    """Small example where every transition is allowed."""
+    adjacency = FULLY_CONNECTED_THREE_STATE
     history = [1, 1, 2, 3, 1, 2]
-    horizon = 2
+    H = 2
     alpha = 0.2
     max_permutations = 200
-    random_seed = 123
+    seed = 123
 
     results = run_all_methods(
         history=history,
-        horizon=horizon,
+        horizon=H,
         alpha=alpha,
         adjacency=adjacency,
         max_permutations=max_permutations,
-        cp_plus_one_anchor=1,
-        random_seed=random_seed,
+        random_seed=seed,
     )
 
     summarize_results("Demo 1: three-state fully connected Markov chain", results)
 
 
 # ---------------------------------------------------------------------
-# Demo 2: short Sweden-like history
+# Demo 2: short four-state conflict graph history
 # ---------------------------------------------------------------------
 
-def demo_sweden_like_short() -> None:
-    """Short dominant-state history: less training information."""
+def demo_conflict_graph_short():
+    """Short example using the four-state conflict graph."""
+    adjacency = CONFLICT_ADJACENCY
     history = [1] * 6
-    horizon = 3
+    H = 3
     alpha = 0.2
     max_permutations = 200
-    random_seed = 123
+    seed = 123
 
     results = run_all_methods(
         history=history,
-        horizon=horizon,
+        horizon=H,
         alpha=alpha,
-        adjacency=CONFLICT_ADJACENCY,
+        adjacency=adjacency,
         max_permutations=max_permutations,
-        cp_plus_one_anchor=1,
-        random_seed=random_seed,
+        random_seed=seed,
     )
 
-    summarize_results("Demo 2: Sweden-like short history, T = 6, H = 3", results)
+    summarize_results("Demo 2: short four-state conflict graph history", results)
 
 
 # ---------------------------------------------------------------------
-# Demo 3: long Sweden-like history
+# Demo 3: longer four-state conflict graph history
 # ---------------------------------------------------------------------
 
-def demo_sweden_like_long(save_plots: bool = True) -> None:
-    """Long dominant-state history: many repeated state-1 observations.
-
-    The horizon is kept small so that the example runs quickly.
-    """
+def demo_conflict_graph_long(save_plots=True):
+    """Longer example using the same graph and repeated state-1 observations."""
+    adjacency = CONFLICT_ADJACENCY
     history = [1] * 420
-    horizon = 3
+    H = 3
     alpha = 0.2
     max_permutations = 200
-    random_seed = 123
+    seed = 123
 
     results = run_all_methods(
         history=history,
-        horizon=horizon,
+        horizon=H,
         alpha=alpha,
-        adjacency=CONFLICT_ADJACENCY,
+        adjacency=adjacency,
         max_permutations=max_permutations,
-        cp_plus_one_anchor=1,
-        random_seed=random_seed,
+        random_seed=seed,
     )
 
-    summarize_results("Demo 3: Sweden-like long history, T = 420, H = 3", results)
+    summarize_results("Demo 3: long four-state conflict graph history", results)
 
     if save_plots:
-        out_dir = Path("demo_outputs")
+        out_dir = DEMO_OUTPUT_DIR
         out_dir.mkdir(exist_ok=True)
-        plot_method_compositions(
-            results,
-            filename_prefix=str(out_dir / "sweden_like_long_H3"),
-            show=False,
+
+        plot_state_composition(
+            results["state_composition"]["likelihood"],
+            "Likelihood baseline",
+            out_dir / "long_conflict_likelihood.png",
         )
-        print(f"Saved state-composition plots to: {out_dir.resolve()}")
+        plot_state_composition(
+            results["state_composition"]["original_iblock"],
+            "Original i-block CP",
+            out_dir / "long_conflict_iblock.png",
+        )
+        plot_state_composition(
+            results["state_composition"]["cp_plus_one"],
+            "CP+1",
+            out_dir / "long_conflict_cp_plus_one.png",
+        )
+
+        print(f"Saved plots to: {out_dir.resolve()}")
 
 
 # ---------------------------------------------------------------------
 # Optional diagnostic: one candidate p-value
 # ---------------------------------------------------------------------
 
-def demo_one_candidate_diagnostic() -> None:
-    """Show how to inspect the i-block structure for one candidate."""
+def demo_one_candidate_diagnostic():
+    """Show the i-block pieces used for one candidate path."""
+    adjacency = CONFLICT_ADJACENCY
     history = [1] * 6
     candidate = (1, 1, 2)
     max_permutations = 50
     seed = 123
 
-    import random
-
-    rng = random.Random(seed)
-    p_value, details = block_p_value_for_candidate(
+    random.seed(seed)
+    p_value = block_p_value_for_candidate(
         history=history,
         candidate=candidate,
-        adjacency=CONFLICT_ADJACENCY,
+        adjacency=adjacency,
         max_permutations=max_permutations,
-        rng=rng,
-        return_details=True,
+    )
+
+    aug_seq = list(history) + list(candidate)
+    i = candidate[-1]
+    I0, blocks, tail = split_i_blocks(aug_seq, i)
+    permuted_sequences = generate_i_block_permutations(
+        I0,
+        blocks,
+        tail,
+        max_permutations=max_permutations,
     )
 
     print("\n" + "=" * 80)
@@ -170,20 +232,21 @@ def demo_one_candidate_diagnostic() -> None:
     print(f"history length: {len(history)}")
     print(f"candidate: {candidate}")
     print(f"p-value: {p_value:.4f}")
-    print(f"anchor state i = candidate[-1]: {details['anchor_state']}")
-    print(f"I0: {details['I0']}")
-    print(f"number of permutable blocks: {len(details['blocks'])}")
-    print(f"number of permutations used: {details['num_permutations_used']}")
+    print(f"anchor state i = candidate[-1]: {i}")
+    print(f"I0: {I0}")
+    print(f"number of permutable blocks: {len(blocks)}")
+    print(f"tail: {tail}")
+    print(f"number of permutations used: {len(permuted_sequences)}")
 
 
 # ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
 
-def main() -> None:
+def main():
     demo_three_state_fully_connected()
-    demo_sweden_like_short()
-    demo_sweden_like_long(save_plots=True)
+    demo_conflict_graph_short()
+    demo_conflict_graph_long(save_plots=True)
     demo_one_candidate_diagnostic()
 
 
