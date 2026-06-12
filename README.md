@@ -18,6 +18,8 @@ markov-cp-iblock/
 ├── .gitignore
 ├── markov_cp_routines.py
 ├── run_demo.py
+├── minimal_example.py
+├── sanity_checks.py
 └── demo_outputs/
 ```
 
@@ -25,6 +27,8 @@ markov-cp-iblock/
 
 - `markov_cp_routines.py`: reusable validation helpers, path enumeration, likelihood baseline, original i-block CP, CP+1, and small summary helpers.
 - `run_demo.py`: user-facing demo script where you set the adjacency matrix, training history, forecast horizon, alpha level, permutation cap, and random seed.
+- `minimal_example.py`: shortest editable example for one small three-state Markov-chain forecasting experiment.
+- `sanity_checks.py`: lightweight checks for the i-block permutation helper.
 - `demo_outputs/`: generated demo plots. The folder is kept in Git with `.gitkeep`, but generated files inside it are ignored.
 
 ## Install
@@ -44,6 +48,18 @@ python run_demo.py
 ```
 
 The demo prints prediction-set summaries and saves state-composition plots for the longer four-state conflict-graph example to `demo_outputs/`.
+
+For the smallest editable example, run:
+
+```bash
+python minimal_example.py
+```
+
+For the i-block permutation sanity check, run:
+
+```bash
+python sanity_checks.py
+```
 
 ## Included Demos
 
