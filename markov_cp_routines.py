@@ -137,7 +137,17 @@ def estimate_transition_matrix(seq, adjacency):
 
 
 def path_probability(start_state, path, P):
-    """Compute the estimated probability of one candidate path."""
+    """Compute the estimated probability of one candidate path.
+
+    NOTE:
+    This function computes the product of transition probabilities along a path,
+    conditional on the first/current state, which is passed here as start_state.
+    It does not multiply by the initial state probability pi[start_state].
+    Therefore, it is not intended for computing the full joint probability of
+    an entire Markov chain path unless the initial probability is included
+    separately. In particular, this does not handle the special case where the
+    training data length is one and an initial state probability is required.
+    """
     prob = 1.0
     current = start_state
 
@@ -243,53 +253,72 @@ def build_sequence_from_blocks(I0, ordered_blocks, tail):
     return seq
 
 
-def generate_i_block_permutations(I0, blocks, tail, max_permutations=None):
+def generate_i_block_permutations(I0, blocks, tail=None, max_permutations=None):
     """Generate or sample i-block permutations.
+
+    Typical internal use:
+        generate_i_block_permutations(I0, blocks, tail, max_permutations)
+
+    Convenience use for quick checks:
+        generate_i_block_permutations(sequence, i, max_permutations=None)
 
     For small examples, max_permutations can be None and all permutations are
     generated. For larger examples, max_permutations samples shuffled block
     orders directly instead of first building every factorial permutation.
     """
-    if len(blocks) == 0:
-        return [build_sequence_from_blocks(I0, [], tail)]
+    if tail is None and isinstance(blocks, (int, np.integer)):
+        I0, blocks, tail = split_i_blocks(I0, int(blocks))
+
+    if tail is None:
+        raise ValueError("tail must be provided unless calling with sequence and i.")
 
     if max_permutations is None:
         number_of_permutations = math.factorial(len(blocks))
         if number_of_permutations > 50000:
             raise ValueError("too many permutations; set max_permutations.")
 
+        seen_sequences = set()
         permuted_sequences = []
 
         for ordered_blocks in permutations(blocks):
             seq_perm = build_sequence_from_blocks(I0, ordered_blocks, tail)
-            permuted_sequences.append(seq_perm)
+            seq_key = tuple(seq_perm)
+
+            if seq_key not in seen_sequences:
+                seen_sequences.add(seq_key)
+                permuted_sequences.append(seq_perm)
 
         return permuted_sequences
+    else:
+        if max_permutations <= 0:
+            return []
 
-    permuted_sequences = []
-    seen_orders = set()
+        seen_sequences = set()
+        permuted_sequences = []
 
-    identity_order = tuple(range(len(blocks)))
-    seen_orders.add(identity_order)
-    permuted_sequences.append(build_sequence_from_blocks(I0, blocks, tail))
+        identity_sequence = build_sequence_from_blocks(I0, blocks, tail)
+        identity_key = tuple(identity_sequence)
+        seen_sequences.add(identity_key)
+        permuted_sequences.append(identity_sequence)
 
-    max_attempts = max(100, max_permutations * 20)
-    attempts = 0
+        max_attempts = max(100, max_permutations * 20)
+        attempts = 0
 
-    while len(permuted_sequences) < max_permutations and attempts < max_attempts:
-        order = list(range(len(blocks)))
-        random.shuffle(order)
-        order_tuple = tuple(order)
-
-        if order_tuple not in seen_orders:
-            seen_orders.add(order_tuple)
+        while len(permuted_sequences) < max_permutations and attempts < max_attempts:
+            order = list(range(len(blocks)))
+            random.shuffle(order)
             ordered_blocks = [blocks[k] for k in order]
+
             seq_perm = build_sequence_from_blocks(I0, ordered_blocks, tail)
-            permuted_sequences.append(seq_perm)
+            seq_key = tuple(seq_perm)
 
-        attempts += 1
+            if seq_key not in seen_sequences:
+                seen_sequences.add(seq_key)
+                permuted_sequences.append(seq_perm)
 
-    return permuted_sequences
+            attempts += 1
+
+        return permuted_sequences
 
 
 def score_sequence(seq_perm, T, H, P_hat):
