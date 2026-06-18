@@ -65,39 +65,25 @@ permutation-group element.
 For each original candidate $y$ and one auxiliary state $u$, define the
 extended candidate:
 
-$$
-z = (y, u).
-$$
+$$ z = (y, u). $$
 
 The code computes the original i-block p-value on each extended candidate:
 
-$$
-p_{\mathrm{block}}(y, u).
-$$
+$$ p_{\mathrm{block}}(y, u). $$
 
 For each extended candidate, let $D(y, u)$ be the number of middle permutable
 i-blocks. This excludes both the fixed prefix $I_0$ and the final fixed tail
 block. The full mathematical permutation-group size is:
 
-$$
-|\Pi(y, u)| = D(y, u)!.
-$$
+$$ |\Pi(y, u)| = D(y, u)!. $$
 
 The cardinality-weighted aggregated value is:
 
-$$
-\tilde q(y)
-=
-\sum_{u}
-\frac{|\Pi(y, u)|}{\sum_{v} |\Pi(y, v)|}
-p_{\mathrm{block}}(y, u).
-$$
+$$ \tilde q(y) = \sum_{u} \frac{|\Pi(y, u)|}{\sum_{v} |\Pi(y, v)|} p_{\mathrm{block}}(y, u). $$
 
 The new exploratory prediction set is:
 
-$$
-C_{\mathrm{new}} = \{y : \tilde q(y) > \alpha\}.
-$$
+$$ C_{\mathrm{new}} = \{y : \tilde q(y) > \alpha\}. $$
 
 This is an exploratory computational method. A formal validity proof is not
 included in this branch.
