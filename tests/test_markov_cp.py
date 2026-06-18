@@ -215,8 +215,7 @@ class MarkovCPRoutineTests(unittest.TestCase):
             timeout=60,
         )
 
-        self.assertIn("Case 1: fixed random/mixed history", completed.stdout)
-        self.assertIn("Case 2: dominant-state history", completed.stdout)
+        self.assertIn("Editable history", completed.stdout)
         self.assertIn("Direct auxiliary_candidate_table row count: 9", completed.stdout)
 
 
