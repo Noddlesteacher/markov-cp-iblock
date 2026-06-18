@@ -1,9 +1,9 @@
 """
-Run the two dense three-state experiments requested for the current meeting.
+Quick demo for dense three-state Markov i-block experiments.
 
-Edit the constants below to change the history length, permutation cap, alpha
-level, or tie-breaking seeds. The mathematical routines live in
-markov_cp_routines.py.
+For a new experiment, edit the "Quick experiment controls" block below, then run:
+
+    python run_demo.py
 """
 
 from collections import Counter, defaultdict
@@ -22,19 +22,36 @@ from markov_cp_routines import (
 
 
 # ---------------------------------------------------------------------
-# User-editable experiment settings
+# Quick experiment controls
+#
+# For most experiments, edit only this block.
 # ---------------------------------------------------------------------
 
 NUM_STATES = 3
 ADJACENCY = np.ones((NUM_STATES, NUM_STATES), dtype=int)
-TRAINING_LENGTH = 100
 HORIZON = 1
 ALPHA = 0.2
 MAX_PERMUTATIONS = 500
 
-HISTORY_SEED = 8
+# Put the observed training history here.
+HISTORY = [1] * 100
+
+# Change this one number to reproduce one detailed randomized p-value table.
 DETAIL_TIE_SEED = 1
+
+# This is the simple repeated-run loop: range(1, 11) gives ten runs.
 TIE_BREAKING_SEEDS = range(1, 11)
+
+# Set this to True only when you want to rerun the two built-in examples.
+RUN_BUILT_IN_CASES = False
+
+
+# ---------------------------------------------------------------------
+# Optional built-in histories
+# ---------------------------------------------------------------------
+
+TRAINING_LENGTH = 100
+HISTORY_SEED = 8
 
 
 def set_tie_seed(seed: int) -> None:
@@ -134,6 +151,28 @@ def print_comparison(
         )
 
 
+def print_seed_by_seed_rows(
+    case_name: str,
+    seed_rows: list[tuple[int, tuple[int, ...], float, bool, float, bool]],
+) -> None:
+    """Print the direct for-loop output: one row per seed and candidate."""
+    print("\n" + "=" * 88)
+    print(f"{case_name}: p-values from each tie-breaking seed")
+    print("=" * 88)
+    print("seed    y       original_p   orig_in   q_tilde    new_in")
+    print("-" * 62)
+
+    for seed, candidate, original_p, original_included, q_tilde, new_included in seed_rows:
+        print(
+            f"{seed:<8}"
+            f"{path_text(candidate):<8}"
+            f"{original_p:>10.4f}"
+            f"{str(original_included):>10}"
+            f"{q_tilde:>10.4f}"
+            f"{str(new_included):>10}"
+        )
+
+
 def run_detailed_case(case_name: str, history: list[int]) -> None:
     """Run one detailed seed and print every intermediate row."""
     print("\n" + "=" * 88)
@@ -181,6 +220,7 @@ def repeat_case(case_name: str, history: list[int]) -> None:
             "new_included": [],
         }
     )
+    seed_rows: list[tuple[int, tuple[int, ...], float, bool, float, bool]] = []
 
     for seed in TIE_BREAKING_SEEDS:
         set_tie_seed(seed)
@@ -212,6 +252,18 @@ def repeat_case(case_name: str, history: list[int]) -> None:
             bucket["original_included"].append(float(original_row.p_value > ALPHA))
             bucket["q_tilde"].append(result.q_tilde)
             bucket["new_included"].append(float(result.included))
+            seed_rows.append(
+                (
+                    seed,
+                    result.original_candidate,
+                    original_row.p_value,
+                    original_row.p_value > ALPHA,
+                    result.q_tilde,
+                    result.included,
+                )
+            )
+
+    print_seed_by_seed_rows(case_name, seed_rows)
 
     print("\n" + "=" * 88)
     print(f"{case_name}: repeated over tie seeds {list(TIE_BREAKING_SEEDS)}")
@@ -237,19 +289,22 @@ def run_case(case_name: str, history: list[int]) -> None:
 
 
 def main() -> None:
-    mixed_history = make_mixed_history()
-    dominant_history = [1] * TRAINING_LENGTH
-
     print("Dense three-state Markov i-block experiments")
     print(f"NUM_STATES = {NUM_STATES}")
-    print(f"TRAINING_LENGTH = {TRAINING_LENGTH}")
     print(f"HORIZON = {HORIZON}")
     print(f"ALPHA = {ALPHA}")
     print(f"MAX_PERMUTATIONS = {MAX_PERMUTATIONS}")
-    print(f"HISTORY_SEED = {HISTORY_SEED}")
+    print(f"DETAIL_TIE_SEED = {DETAIL_TIE_SEED}")
 
-    run_case("Case 1: fixed random/mixed history", mixed_history)
-    run_case("Case 2: dominant-state history", dominant_history)
+    if RUN_BUILT_IN_CASES:
+        mixed_history = make_mixed_history()
+        dominant_history = [1] * TRAINING_LENGTH
+
+        print(f"HISTORY_SEED = {HISTORY_SEED}")
+        run_case("Case 1: fixed random/mixed history", mixed_history)
+        run_case("Case 2: dominant-state history", dominant_history)
+    else:
+        run_case("Editable history", HISTORY)
 
 
 if __name__ == "__main__":
