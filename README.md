@@ -1,8 +1,8 @@
 # Markov CP i-block
 
 Preliminary research code for conformal prediction with finite-state Markov
-chains. The active workflow is intentionally small so that meeting experiments
-can be edited and rerun quickly.
+chains. The active workflow is intentionally small so that dense three-state
+experiments can be edited and rerun quickly.
 
 ## Active File Structure
 
@@ -112,7 +112,7 @@ The normalized cardinality weights use `full_group_size`, via the stable
 quantity `log_full_group_size = lgamma(D + 1)`. They do not use
 `n_permutations_evaluated`.
 
-## Demo Cases
+## Quick Experiment Setup
 
 Run:
 
@@ -120,7 +120,65 @@ Run:
 python run_demo.py
 ```
 
-The demo runs exactly two cases:
+For a new dense three-state experiment, edit the small control block near the
+top of `run_demo.py`:
+
+```python
+HISTORY = [1] * 100
+DETAIL_TIE_SEED = 1
+TIE_BREAKING_SEEDS = range(1, 11)
+MAX_PERMUTATIONS = 500
+ALPHA = 0.2
+```
+
+For example, to test a different observed training sequence:
+
+```python
+history = [1, 2, 3, 1, 2, 3, 1, 1, 2]
+```
+
+change only:
+
+```python
+HISTORY = [1, 2, 3, 1, 2, 3, 1, 1, 2]
+```
+
+Then run:
+
+```bash
+python run_demo.py
+```
+
+The output prints the three original candidates, all nine extended candidates,
+the cardinality weights, `q_tilde`, and the repeated-seed results.
+
+The repeated randomized p-values are controlled by:
+
+```python
+TIE_BREAKING_SEEDS = range(1, 11)
+```
+
+This prints a table named `p-values from each tie-breaking seed`, with one row
+for each seed and candidate path. For the default `range(1, 11)`, this gives ten
+runs for each candidate path. To run only three repeats while checking code
+quickly, use:
+
+```python
+TIE_BREAKING_SEEDS = range(1, 4)
+```
+
+The reusable mathematical code in `markov_cp_routines.py` usually does not need
+to be edited for these quick checks.
+
+## Built-in Demo Cases
+
+If you want the two built-in examples, set:
+
+```python
+RUN_BUILT_IN_CASES = True
+```
+
+Those built-in cases are:
 
 1. A fixed random/mixed training sequence of length 100 from states `{1,2,3}`,
    generated once using `HISTORY_SEED`.
