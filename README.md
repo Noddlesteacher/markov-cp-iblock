@@ -1,100 +1,155 @@
 # Markov CP i-block
 
-Preliminary research code for Markov conformal prediction experiments. The repository implements small, readable routines for:
+Preliminary research code for conformal prediction with finite-state Markov
+chains. The active workflow is intentionally small so that meeting experiments
+can be edited and rerun quickly.
 
-- a likelihood-based prediction baseline;
-- the original i-block conformal prediction method;
-- a graph-constrained CP+1 variant;
-- simple demo examples for testing and comparison.
-
-The core routines do not hard-code a specific graph. They take an adjacency matrix as input and infer the number of states with `adjacency.shape[0]`. State labels are assumed to be `1, 2, ..., S`.
-
-## Repository Structure
+## Active File Structure
 
 ```text
 markov-cp-iblock/
 ├── README.md
-├── requirements.txt
-├── .gitignore
 ├── markov_cp_routines.py
 ├── run_demo.py
-├── minimal_example.py
-├── sanity_checks.py
-└── demo_outputs/
+├── requirements.txt
+└── tests/
+    └── test_markov_cp.py
 ```
 
-## Files
+`markov_cp_routines.py` contains reusable mathematical routines only. It has no
+experiment-specific histories, plotting code, or giant method wrapper.
 
-- `markov_cp_routines.py`: reusable validation helpers, path enumeration, likelihood baseline, original i-block CP, CP+1, and small summary helpers.
-- `run_demo.py`: user-facing demo script where you set the adjacency matrix, training history, forecast horizon, alpha level, permutation cap, and random seed.
-- `minimal_example.py`: shortest editable example for one small three-state Markov-chain forecasting experiment.
-- `sanity_checks.py`: lightweight checks for the i-block permutation helper.
-- `demo_outputs/`: generated demo plots. The folder is kept in Git with `.gitkeep`, but generated files inside it are ignored.
+`run_demo.py` contains the current dense three-state experiments and the
+user-editable inputs near the top of the file.
 
-## Install
+## Current Research Setting
 
-From the repository root:
+This branch focuses on the simplified dense-adjacency setting:
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+```python
+X = {1, 2, 3}
+A = np.ones((3, 3), dtype=int)
 ```
 
-## Run
+The default demo uses:
+
+- training length `T = 100`
+- forecast horizon `L = 1`
+- one auxiliary state `K = 1`
+- `alpha = 0.2`
+
+The sparse four-state conflict graph and the two-auxiliary-state extension are
+not part of this refactor.
+
+## Original i-block Diagnostic
+
+For a candidate future path `y`, the code forms the augmented sequence
+`history + y`, estimates the transition matrix from that candidate-specific
+augmented sequence, decomposes the sequence into i-blocks using
+`anchor_state = y[-1]`, and computes the randomized original i-block p-value.
+
+The candidate-level diagnostic reports:
+
+- `p_value`
+- `n_permutable_blocks`, written mathematically as `D`
+- `log_full_group_size = log(D!)`
+- `full_group_size = D!` when the integer is small enough to print usefully
+- `n_permutations_evaluated`, which may be capped by `max_permutations`
+
+Block permutations are indexed block-order permutations. If two blocks have the
+same state contents, swapping their labels still counts as a different
+permutation-group element.
+
+## Cardinality-weighted Auxiliary Method
+
+For each original candidate `y` and one auxiliary state `u`, define the extended
+candidate:
+
+```text
+z = (y, u)
+```
+
+The code computes the original i-block p-value on each extended candidate:
+
+```text
+p_block(y, u)
+```
+
+For each extended candidate, let `D(y, u)` be the number of middle permutable
+i-blocks. This excludes both the fixed prefix `I0` and the final fixed tail
+block. The full mathematical permutation-group size is:
+
+```text
+|Pi(y, u)| = D(y, u)!
+```
+
+The cardinality-weighted aggregated value is:
+
+```text
+q_tilde(y)
+  = sum_u [ |Pi(y,u)| / sum_v |Pi(y,v)| ] p_block(y,u)
+```
+
+The new exploratory prediction set is:
+
+```text
+C_new = { y : q_tilde(y) > alpha }
+```
+
+This is an exploratory computational method. A formal validity proof is not
+included in this branch.
+
+## Cardinality vs Evaluated Permutations
+
+The implementation deliberately separates three quantities:
+
+- `n_permutable_blocks`: `D(y, u)`
+- `full_group_size`: the theoretical `D(y, u)!`
+- `n_permutations_evaluated`: the number of sampled or enumerated permutations
+  actually used in the p-value calculation
+
+The normalized cardinality weights use `full_group_size`, via the stable
+quantity `log_full_group_size = lgamma(D + 1)`. They do not use
+`n_permutations_evaluated`.
+
+## Demo Cases
+
+Run:
 
 ```bash
 python run_demo.py
 ```
 
-The demo prints prediction-set summaries and saves state-composition plots for the longer four-state conflict-graph example to `demo_outputs/`.
+The demo runs exactly two cases:
 
-For the smallest editable example, run:
+1. A fixed random/mixed training sequence of length 100 from states `{1,2,3}`,
+   generated once using `HISTORY_SEED`.
+2. A dominant-state training sequence:
+
+   ```python
+   history = [1] * 100
+   ```
+
+For each case, the script prints:
+
+- the original i-block candidate table;
+- all nine extended candidate rows `(y, u)`;
+- each row's p-value, `D`, `log(D!)`, cardinality weight, and evaluated
+  permutation count;
+- the comparison between original p-values and `q_tilde(y)`;
+- a ten-seed summary of mean original p-values, original inclusion frequency,
+  mean `q_tilde`, and new inclusion frequency.
+
+## Tests
+
+Run:
 
 ```bash
-python minimal_example.py
+python -m py_compile markov_cp_routines.py run_demo.py
+python -m unittest discover -s tests
 ```
 
-For the i-block permutation sanity check, run:
-
-```bash
-python sanity_checks.py
-```
-
-## Included Demos
-
-- Demo 1: a three-state fully connected Markov chain with a short mixed history.
-- Demo 2: a short four-state conflict-graph history with repeated state 1 observations.
-- Demo 3: a longer four-state conflict-graph history with repeated state 1 observations and saved plots.
-- Diagnostic example: computes one candidate i-block p-value and prints the block decomposition details.
-
-## Modify An Experiment
-
-Edit `run_demo.py` to change:
-
-- `adjacency`: an `S x S` NumPy array where `adjacency[a-1, b-1] = 1` means transition `a -> b` is allowed.
-- `history`: observed state sequence using labels `1, ..., S`.
-- `horizon`: number of future states to forecast.
-- `alpha`: miscoverage level.
-- `max_permutations`: maximum number of i-block permutations to enumerate or sample.
-- `random_seed`: seed for reproducible sampled permutations and tie-breaking.
-
-For example:
-
-```python
-import numpy as np
-from markov_cp_routines import run_all_methods
-
-adjacency = np.ones((3, 3), dtype=int)
-history = [1, 1, 2, 3, 1, 2]
-results = run_all_methods(
-    history=history,
-    horizon=2,
-    alpha=0.2,
-    adjacency=adjacency,
-    max_permutations=500,
-    random_seed=123,
-)
-```
-
-This code is intended as preliminary research code for Markov conformal prediction, with clarity and easy modification prioritized over packaging complexity.
+The tests cover adjacency validation, candidate enumeration, i-block
+decomposition, indexed block-order permutations, factorial cardinalities,
+cardinality weights, p-value ranges, `q_tilde` ranges, seed reproducibility,
+core signatures without `random_seed`, and successful demo execution.

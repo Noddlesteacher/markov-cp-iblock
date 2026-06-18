@@ -1,552 +1,554 @@
 """
-markov_cp_routines.py
+Reusable routines for finite-state Markov-chain i-block conformal experiments.
 
-Core routines for likelihood-based prediction, original i-block conformal
-prediction, and the graph-constrained CP+1 variant for finite-state Markov
-chains.
-
-State labels are assumed to be 1, 2, ..., S, where S is inferred from the
-number of rows in the adjacency matrix.
+The active research workflow for this branch is intentionally small:
+candidate diagnostics for the original i-block procedure, plus a dense
+three-state cardinality-weighted auxiliary-state experiment.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass as _dataclass
+from itertools import permutations
 import math
 import random
-from itertools import permutations
+from typing import Sequence
 
 import numpy as np
 
 
-# ---------------------------------------------------------------------
-# Graph helpers
-# ---------------------------------------------------------------------
+State = int
+Path = tuple[State, ...]
+SequenceLike = Sequence[State]
 
-def check_adjacency(adjacency):
-    """Return adjacency as a checked NumPy array."""
-    adjacency = np.asarray(adjacency, dtype=int)
+MAX_EXACT_PERMUTATIONS = 50_000
+MAX_FACTORIAL_INT_D = 20
 
-    if adjacency.ndim != 2 or adjacency.shape[0] != adjacency.shape[1]:
-        raise ValueError("adjacency must be a square matrix.")
 
-    if not np.all((adjacency == 0) | (adjacency == 1)):
+@_dataclass(frozen=True)
+class IBlockDiagnostic:
+    """One candidate-level original i-block conformal diagnostic."""
+
+    candidate: Path
+    anchor_state: State
+    p_value: float
+    n_permutable_blocks: int
+    log_full_group_size: float
+    full_group_size: int | None
+    n_permutations_evaluated: int
+
+
+@_dataclass(frozen=True)
+class AuxiliaryDiagnostic:
+    """One extended candidate row for the cardinality-weighted method."""
+
+    original_candidate: Path
+    auxiliary_state: State
+    extended_candidate: Path
+    anchor_state: State
+    p_value: float
+    n_permutable_blocks: int
+    log_full_group_size: float
+    full_group_size: int | None
+    n_permutations_evaluated: int
+    normalized_cardinality_weight: float
+
+
+@_dataclass(frozen=True)
+class AggregatedCandidateResult:
+    """Aggregated q_tilde result for one original candidate."""
+
+    original_candidate: Path
+    q_tilde: float
+    included: bool
+    auxiliary_rows: tuple[AuxiliaryDiagnostic, ...]
+
+
+def check_adjacency(adjacency: Sequence[Sequence[int]] | np.ndarray) -> np.ndarray:
+    """Return a checked square 0/1 adjacency matrix."""
+    adjacency_array = np.asarray(adjacency, dtype=int)
+
+    if adjacency_array.ndim != 2:
+        raise ValueError("adjacency must be a two-dimensional square matrix.")
+
+    if adjacency_array.shape[0] != adjacency_array.shape[1]:
+        raise ValueError("adjacency must be square.")
+
+    if not np.all((adjacency_array == 0) | (adjacency_array == 1)):
         raise ValueError("adjacency must contain only 0/1 entries.")
 
-    if np.any(adjacency.sum(axis=1) == 0):
-        raise ValueError("each state needs at least one allowed next state.")
+    if np.any(adjacency_array.sum(axis=1) == 0):
+        raise ValueError("each state must have at least one allowed next state.")
 
-    return adjacency
+    return adjacency_array
 
 
-def allowed_next(state, adjacency):
-    """Return all states that can follow the current state."""
-    adjacency = check_adjacency(adjacency)
-    num_states = adjacency.shape[0]
+def check_sequence(
+    sequence: SequenceLike,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+) -> list[State]:
+    """Validate state labels and allowed transitions, then return a list."""
+    adjacency_array = check_adjacency(adjacency)
+    num_states = adjacency_array.shape[0]
+    sequence_list = [int(state) for state in sequence]
+
+    if len(sequence_list) == 0:
+        raise ValueError("sequence must be nonempty.")
+
+    for state in sequence_list:
+        if state < 1 or state > num_states:
+            raise ValueError(f"state must be between 1 and {num_states}.")
+
+    for t in range(len(sequence_list) - 1):
+        if adjacency_array[sequence_list[t] - 1, sequence_list[t + 1] - 1] != 1:
+            raise ValueError(
+                f"forbidden transition: {sequence_list[t]} -> {sequence_list[t + 1]}"
+            )
+
+    return sequence_list
+
+
+def allowed_next(
+    state: State,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+) -> list[State]:
+    """Return all states that may follow state."""
+    adjacency_array = check_adjacency(adjacency)
+    num_states = adjacency_array.shape[0]
 
     if state < 1 or state > num_states:
         raise ValueError(f"state must be between 1 and {num_states}.")
 
-    row = adjacency[state - 1]
-    next_states = []
-
-    for j in range(num_states):
-        if row[j] == 1:
-            next_states.append(j + 1)
-
-    return next_states
+    return [
+        next_state + 1
+        for next_state, allowed in enumerate(adjacency_array[state - 1])
+        if allowed == 1
+    ]
 
 
-def is_allowed_transition(a, b, adjacency):
-    """Return True if the transition a -> b is allowed."""
-    adjacency = check_adjacency(adjacency)
-    num_states = adjacency.shape[0]
+def enumerate_paths(
+    start_state: State,
+    horizon: int,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+) -> list[Path]:
+    """Enumerate all allowed future paths of length horizon."""
+    adjacency_array = check_adjacency(adjacency)
+    num_states = adjacency_array.shape[0]
 
-    if a < 1 or a > num_states or b < 1 or b > num_states:
-        return False
+    if horizon < 0:
+        raise ValueError("horizon must be nonnegative.")
 
-    return adjacency[a - 1, b - 1] == 1
+    if start_state < 1 or start_state > num_states:
+        raise ValueError(f"start_state must be between 1 and {num_states}.")
 
+    def extend(current_state: State, steps_left: int) -> list[Path]:
+        if steps_left == 0:
+            return [()]
 
-def check_sequence(seq, adjacency):
-    """Check that a sequence uses valid states and allowed transitions."""
-    adjacency = check_adjacency(adjacency)
-    num_states = adjacency.shape[0]
+        paths: list[Path] = []
+        for next_state in allowed_next(current_state, adjacency_array):
+            for suffix in extend(next_state, steps_left - 1):
+                paths.append((next_state,) + suffix)
 
-    if len(seq) == 0:
-        raise ValueError("sequence must be nonempty.")
+        return paths
 
-    for state in seq:
-        if state < 1 or state > num_states:
-            raise ValueError(f"state must be between 1 and {num_states}.")
-
-    for t in range(len(seq) - 1):
-        if not is_allowed_transition(seq[t], seq[t + 1], adjacency):
-            raise ValueError(f"forbidden transition: {seq[t]} -> {seq[t + 1]}")
-
-
-# ---------------------------------------------------------------------
-# Candidate paths and likelihood baseline
-# ---------------------------------------------------------------------
-
-def enumerate_paths(start_state, H, adjacency):
-    """Enumerate all allowed future paths of length H."""
-    if H == 0:
-        return [()]
-
-    paths = []
-
-    for next_state in allowed_next(start_state, adjacency):
-        subpaths = enumerate_paths(next_state, H - 1, adjacency)
-
-        for subpath in subpaths:
-            new_path = (next_state,) + subpath
-            paths.append(new_path)
-
-    return paths
+    return extend(start_state, horizon)
 
 
-def transition_counts(seq):
-    """Count transitions in a sequence."""
-    counts = {}
-
-    for t in range(len(seq) - 1):
-        a = seq[t]
-        b = seq[t + 1]
-        counts[(a, b)] = counts.get((a, b), 0) + 1
+def transition_counts(sequence: SequenceLike) -> dict[tuple[State, State], int]:
+    """Count adjacent transitions in a state sequence."""
+    counts: dict[tuple[State, State], int] = {}
+    for first, second in zip(sequence[:-1], sequence[1:]):
+        key = (int(first), int(second))
+        counts[key] = counts.get(key, 0) + 1
 
     return counts
 
 
-def estimate_transition_matrix(seq, adjacency):
-    """Estimate the transition matrix from transition counts."""
-    adjacency = check_adjacency(adjacency)
-    check_sequence(seq, adjacency)
+def estimate_transition_matrix(
+    sequence: SequenceLike,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+) -> np.ndarray:
+    """Estimate the unsmoothed transition matrix from one augmented sequence."""
+    adjacency_array = check_adjacency(adjacency)
+    sequence_list = check_sequence(sequence, adjacency_array)
+    num_states = adjacency_array.shape[0]
 
-    num_states = adjacency.shape[0]
-    counts = transition_counts(seq)
+    transition_matrix = np.zeros((num_states, num_states), dtype=float)
+    row_totals = np.zeros(num_states, dtype=float)
+    counts = transition_counts(sequence_list)
 
-    P = np.zeros((num_states, num_states))
-    row_totals = np.zeros(num_states)
+    for (first, _second), count in counts.items():
+        row_totals[first - 1] += count
 
-    for (a, b), count in counts.items():
-        row_totals[a - 1] += count
+    for (first, second), count in counts.items():
+        if row_totals[first - 1] > 0:
+            transition_matrix[first - 1, second - 1] = count / row_totals[first - 1]
 
-    for (a, b), count in counts.items():
-        if row_totals[a - 1] > 0:
-            P[a - 1, b - 1] = count / row_totals[a - 1]
-
-    return P
-
-
-def path_probability(start_state, path, P):
-    """Compute the estimated probability of one candidate path.
-
-    NOTE:
-    This function computes the product of transition probabilities along a path,
-    conditional on the first/current state, which is passed here as start_state.
-    It does not multiply by the initial state probability pi[start_state].
-    Therefore, it is not intended for computing the full joint probability of
-    an entire Markov chain path unless the initial probability is included
-    separately. In particular, this does not handle the special case where the
-    training data length is one and an initial state probability is required.
-    """
-    prob = 1.0
-    current = start_state
-
-    for next_state in path:
-        prob = prob * P[current - 1, next_state - 1]
-        current = next_state
-
-    return prob
+    return transition_matrix
 
 
-def path_probabilities(history, H, adjacency):
-    """Compute estimated probabilities for all allowed candidate paths."""
-    check_sequence(history, adjacency)
-
-    P = estimate_transition_matrix(history, adjacency)
-    start_state = history[-1]
-
-    paths = enumerate_paths(start_state, H, adjacency)
-    paths_probs = []
-
-    for path in paths:
-        prob = path_probability(start_state, path, P)
-        paths_probs.append((path, prob))
-
-    paths_probs_sorted = sorted(
-        paths_probs,
-        key=lambda item: item[1],
-        reverse=True,
-    )
-
-    return paths_probs_sorted
-
-
-def likelihood_prediction_set(history, H, alpha, adjacency):
-    """Return the likelihood prediction set with target coverage 1 - alpha."""
-    path_probs_sorted = path_probabilities(history, H, adjacency)
-
-    selected_paths = []
-    cum_prob = 0.0
-    target_coverage = 1 - alpha
-
-    for path, prob in path_probs_sorted:
-        selected_paths.append(path)
-        cum_prob += prob
-
-        if cum_prob >= target_coverage:
-            break
-
-    return selected_paths
-
-
-# ---------------------------------------------------------------------
-# i-block conformal prediction
-# ---------------------------------------------------------------------
-
-def split_i_blocks(seq, i):
-    """Split a sequence into I0, permutable i-blocks, and the final tail."""
-    positions = []
-
-    for idx, state in enumerate(seq):
-        if state == i:
-            positions.append(idx)
+def split_i_blocks(sequence: SequenceLike, anchor_state: State) -> tuple[list[State] | None, list[list[State]], list[State]]:
+    """Split sequence into fixed I0, middle i-blocks, and fixed final tail."""
+    sequence_list = [int(state) for state in sequence]
+    positions = [
+        index
+        for index, state in enumerate(sequence_list)
+        if state == int(anchor_state)
+    ]
 
     if len(positions) == 0:
-        raise ValueError("State i does not appear in the sequence.")
+        raise ValueError("anchor_state does not appear in the sequence.")
 
     if positions[0] == 0:
-        I0 = None
+        initial_block = None
     else:
-        I0 = seq[:positions[0]]
+        initial_block = sequence_list[: positions[0]]
 
-    all_blocks = []
-
-    for k in range(len(positions)):
-        start = positions[k]
-
-        if k < len(positions) - 1:
-            end = positions[k + 1]
-            block = seq[start:end]
+    all_i_blocks: list[list[State]] = []
+    for position_index, start in enumerate(positions):
+        if position_index < len(positions) - 1:
+            end = positions[position_index + 1]
+            block = sequence_list[start:end]
         else:
-            block = seq[start:]
+            block = sequence_list[start:]
 
-        all_blocks.append(block)
+        all_i_blocks.append(block)
 
-    tail = all_blocks[-1]
-    blocks = all_blocks[:-1]
+    tail = all_i_blocks[-1]
+    permutable_blocks = all_i_blocks[:-1]
 
-    return I0, blocks, tail
+    return initial_block, permutable_blocks, tail
 
 
-def build_sequence_from_blocks(I0, ordered_blocks, tail):
-    """Build one full sequence from I0, ordered i-blocks, and tail."""
-    seq = []
+def build_sequence_from_blocks(
+    initial_block: SequenceLike | None,
+    ordered_blocks: Sequence[SequenceLike],
+    tail: SequenceLike,
+) -> list[State]:
+    """Reconstruct a full sequence from fixed and permuted i-block pieces."""
+    sequence: list[State] = []
 
-    if I0 is not None:
-        seq.extend(I0)
+    if initial_block is not None:
+        sequence.extend(int(state) for state in initial_block)
 
     for block in ordered_blocks:
-        seq.extend(block)
+        sequence.extend(int(state) for state in block)
 
-    seq.extend(tail)
+    sequence.extend(int(state) for state in tail)
+    return sequence
 
-    return seq
 
+def permutation_group_summary(n_permutable_blocks: int) -> tuple[float, int | None]:
+    """Return log(D!) and, when display is practical, D! as an integer.
 
-def generate_i_block_permutations(I0, blocks, tail=None, max_permutations=None):
-    """Generate or sample i-block permutations.
-
-    Typical internal use:
-        generate_i_block_permutations(I0, blocks, tail, max_permutations)
-
-    Convenience use for quick checks:
-        generate_i_block_permutations(sequence, i, max_permutations=None)
-
-    For small examples, max_permutations can be None and all permutations are
-    generated. For larger examples, max_permutations samples shuffled block
-    orders directly instead of first building every factorial permutation.
+    Here D is the number of permutable middle i-blocks. The full mathematical
+    permutation-group cardinality is |Pi| = D!, independent of any sampling cap.
     """
-    if tail is None and isinstance(blocks, (int, np.integer)):
-        I0, blocks, tail = split_i_blocks(I0, int(blocks))
+    if n_permutable_blocks < 0:
+        raise ValueError("n_permutable_blocks must be nonnegative.")
 
-    if tail is None:
-        raise ValueError("tail must be provided unless calling with sequence and i.")
+    log_full_group_size = math.lgamma(n_permutable_blocks + 1)
+
+    if n_permutable_blocks <= MAX_FACTORIAL_INT_D:
+        full_group_size = math.factorial(n_permutable_blocks)
+    else:
+        full_group_size = None
+
+    return log_full_group_size, full_group_size
+
+
+def block_index_orders(
+    n_permutable_blocks: int,
+    max_permutations: int | None = None,
+) -> list[tuple[int, ...]]:
+    """Enumerate or sample indexed block-order permutations.
+
+    A permutation is an ordering of block indices, not a resulting state
+    sequence. Identical block contents are still different indexed blocks.
+    """
+    if n_permutable_blocks < 0:
+        raise ValueError("n_permutable_blocks must be nonnegative.")
+
+    full_group_size = math.factorial(n_permutable_blocks)
 
     if max_permutations is None:
-        number_of_permutations = math.factorial(len(blocks))
-        if number_of_permutations > 50000:
-            raise ValueError("too many permutations; set max_permutations.")
+        if full_group_size > MAX_EXACT_PERMUTATIONS:
+            raise ValueError("too many exact block permutations; set max_permutations.")
 
-        seen_sequences = set()
-        permuted_sequences = []
+        return list(permutations(range(n_permutable_blocks)))
 
-        for ordered_blocks in permutations(blocks):
-            seq_perm = build_sequence_from_blocks(I0, ordered_blocks, tail)
-            seq_key = tuple(seq_perm)
+    if max_permutations < 1:
+        raise ValueError("max_permutations must be positive or None.")
 
-            if seq_key not in seen_sequences:
-                seen_sequences.add(seq_key)
-                permuted_sequences.append(seq_perm)
+    if full_group_size <= max_permutations and full_group_size <= MAX_EXACT_PERMUTATIONS:
+        return list(permutations(range(n_permutable_blocks)))
 
-        return permuted_sequences
-    else:
-        if max_permutations <= 0:
-            return []
+    identity_order = tuple(range(n_permutable_blocks))
+    orders = [identity_order]
+    seen_orders = {identity_order}
+    target_count = min(max_permutations, full_group_size)
+    attempts = 0
+    max_attempts = max(100, target_count * 20)
 
-        seen_sequences = set()
-        permuted_sequences = []
+    while len(orders) < target_count and attempts < max_attempts:
+        order_list = list(range(n_permutable_blocks))
+        random.shuffle(order_list)
+        order = tuple(order_list)
 
-        identity_sequence = build_sequence_from_blocks(I0, blocks, tail)
-        identity_key = tuple(identity_sequence)
-        seen_sequences.add(identity_key)
-        permuted_sequences.append(identity_sequence)
+        if order not in seen_orders:
+            seen_orders.add(order)
+            orders.append(order)
 
-        max_attempts = max(100, max_permutations * 20)
-        attempts = 0
+        attempts += 1
 
-        while len(permuted_sequences) < max_permutations and attempts < max_attempts:
-            order = list(range(len(blocks)))
-            random.shuffle(order)
-            ordered_blocks = [blocks[k] for k in order]
-
-            seq_perm = build_sequence_from_blocks(I0, ordered_blocks, tail)
-            seq_key = tuple(seq_perm)
-
-            if seq_key not in seen_sequences:
-                seen_sequences.add(seq_key)
-                permuted_sequences.append(seq_perm)
-
-            attempts += 1
-
-        return permuted_sequences
+    return orders
 
 
-def score_sequence(seq_perm, T, H, P_hat):
-    """Compute the nonconformity score from Algorithm 1."""
-    state_T = seq_perm[T - 1]
+def nonconformity_score(
+    sequence: SequenceLike,
+    training_length: int,
+    horizon: int,
+    transition_matrix: np.ndarray,
+) -> float:
+    """Compute the original average-transition-probability nonconformity score."""
+    if horizon < 1:
+        raise ValueError("horizon must be positive for an i-block score.")
 
-    sum_prob = 0.0
+    state_at_training_end = int(sequence[training_length - 1])
+    probability_sum = 0.0
 
-    for j in range(1, H + 1):
-        future_state = seq_perm[T + j - 1]
+    for step in range(1, horizon + 1):
+        future_state = int(sequence[training_length + step - 1])
+        transition_power = np.linalg.matrix_power(transition_matrix, step)
+        probability_sum += transition_power[state_at_training_end - 1, future_state - 1]
 
-        P_power = np.linalg.matrix_power(P_hat, j)
-        prob = P_power[state_T - 1, future_state - 1]
-
-        sum_prob += prob
-
-    average_prob = sum_prob / H
-    score = 1 - average_prob
-
-    return score
+    return 1.0 - probability_sum / horizon
 
 
-def block_p_value_for_candidate(history, candidate, adjacency, max_permutations=None):
-    """Compute the i-block conformal p-value for one candidate path."""
-    check_sequence(history, adjacency)
-    check_sequence([history[-1]] + list(candidate), adjacency)
+def iblock_candidate_diagnostic(
+    history: SequenceLike,
+    candidate: SequenceLike,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+) -> IBlockDiagnostic:
+    """Compute one original randomized i-block p-value with cardinality details."""
+    adjacency_array = check_adjacency(adjacency)
+    history_list = check_sequence(history, adjacency_array)
+    candidate_path = tuple(int(state) for state in candidate)
 
-    T = len(history)
-    H = len(candidate)
+    if len(candidate_path) == 0:
+        raise ValueError("candidate must be nonempty.")
 
-    aug_seq = list(history) + list(candidate)
+    check_sequence([history_list[-1]] + list(candidate_path), adjacency_array)
 
-    P_hat = estimate_transition_matrix(aug_seq, adjacency)
-
-    i = candidate[-1]
-
-    I0, blocks, tail = split_i_blocks(aug_seq, i)
-
-    permuted_sequences = generate_i_block_permutations(
-        I0,
-        blocks,
-        tail,
-        max_permutations=max_permutations,
+    augmented_sequence = history_list + list(candidate_path)
+    transition_matrix = estimate_transition_matrix(augmented_sequence, adjacency_array)
+    anchor_state = candidate_path[-1]
+    initial_block, permutable_blocks, tail = split_i_blocks(
+        augmented_sequence,
+        anchor_state,
     )
 
-    S_identity = score_sequence(aug_seq, T, H, P_hat)
+    n_permutable_blocks = len(permutable_blocks)
+    block_orders = block_index_orders(n_permutable_blocks, max_permutations)
+    identity_score = nonconformity_score(
+        augmented_sequence,
+        training_length=len(history_list),
+        horizon=len(candidate_path),
+        transition_matrix=transition_matrix,
+    )
 
-    scores = []
-    for seq_perm in permuted_sequences:
-        S_perm = score_sequence(seq_perm, T, H, P_hat)
-        scores.append(S_perm)
-
-    tol = 1e-12
-    num_greater = sum(S > S_identity + tol for S in scores)
-    num_equal = sum(abs(S - S_identity) <= tol for S in scores)
-
-    u = random.random()
-
-    p_value = (num_greater + u * num_equal) / len(scores)
-
-    return p_value
-
-
-def iblock_cp_prediction_set(history, H, alpha, adjacency, max_permutations=None):
-    """Return the original i-block conformal prediction set."""
-    start_state = history[-1]
-
-    candidate_paths = enumerate_paths(start_state, H, adjacency)
-    C_cp = []
-
-    for candidate in candidate_paths:
-        p_value = block_p_value_for_candidate(
-            history,
-            candidate,
-            adjacency,
-            max_permutations=max_permutations,
+    scores: list[float] = []
+    for order in block_orders:
+        ordered_blocks = [permutable_blocks[index] for index in order]
+        permuted_sequence = build_sequence_from_blocks(initial_block, ordered_blocks, tail)
+        scores.append(
+            nonconformity_score(
+                permuted_sequence,
+                training_length=len(history_list),
+                horizon=len(candidate_path),
+                transition_matrix=transition_matrix,
+            )
         )
 
-        if p_value > alpha:
-            C_cp.append(candidate)
+    tolerance = 1e-12
+    n_greater = sum(score > identity_score + tolerance for score in scores)
+    n_equal = sum(abs(score - identity_score) <= tolerance for score in scores)
+    p_value = (n_greater + random.random() * n_equal) / len(scores)
+    log_full_group_size, full_group_size = permutation_group_summary(
+        n_permutable_blocks
+    )
 
-    return C_cp
-
-
-# ---------------------------------------------------------------------
-# CP+1
-# ---------------------------------------------------------------------
-
-def extend_candidate_plus_one(candidate, anchor_state=1):
-    """Append one artificial anchor state to a candidate path."""
-    return tuple(candidate) + (anchor_state,)
-
-
-def cp_plus_one_p_value_for_candidate(
-    history,
-    candidate,
-    adjacency,
-    anchor_state=1,
-    max_permutations=None,
-):
-    """Compute the CP+1 p-value for one original candidate path."""
-    if not is_allowed_transition(candidate[-1], anchor_state, adjacency):
-        return 0.0
-
-    extended_candidate = extend_candidate_plus_one(
-        candidate,
+    return IBlockDiagnostic(
+        candidate=candidate_path,
         anchor_state=anchor_state,
+        p_value=p_value,
+        n_permutable_blocks=n_permutable_blocks,
+        log_full_group_size=log_full_group_size,
+        full_group_size=full_group_size,
+        n_permutations_evaluated=len(block_orders),
     )
 
-    p_value = block_p_value_for_candidate(
-        history,
-        extended_candidate,
-        adjacency,
-        max_permutations=max_permutations,
-    )
 
-    return p_value
+def original_iblock_table(
+    history: SequenceLike,
+    horizon: int,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+) -> list[IBlockDiagnostic]:
+    """Return one original i-block diagnostic row for every candidate path."""
+    adjacency_array = check_adjacency(adjacency)
+    history_list = check_sequence(history, adjacency_array)
 
+    candidates = enumerate_paths(history_list[-1], horizon, adjacency_array)
 
-def cp_plus_one_prediction_set(
-    history,
-    H,
-    alpha,
-    adjacency,
-    anchor_state=1,
-    max_permutations=None,
-):
-    """Return the graph-constrained CP+1 prediction set."""
-    start_state = history[-1]
-
-    candidate_paths = enumerate_paths(start_state, H, adjacency)
-    C_cp_plus_one = []
-
-    for candidate in candidate_paths:
-        p_value = cp_plus_one_p_value_for_candidate(
-            history,
+    return [
+        iblock_candidate_diagnostic(
+            history_list,
             candidate,
-            adjacency,
-            anchor_state=anchor_state,
+            adjacency_array,
             max_permutations=max_permutations,
         )
-
-        if p_value > alpha:
-            C_cp_plus_one.append(candidate)
-
-    return C_cp_plus_one
+        for candidate in candidates
+    ]
 
 
-# ---------------------------------------------------------------------
-# Small summary helpers used by run_demo.py
-# ---------------------------------------------------------------------
+def original_iblock_prediction_set(
+    history: SequenceLike,
+    horizon: int,
+    alpha: float,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+) -> list[Path]:
+    """Return original i-block candidates whose randomized p-value exceeds alpha."""
+    if alpha < 0 or alpha > 1:
+        raise ValueError("alpha must be between 0 and 1.")
 
-def state_composition(C, H, adjacency):
-    """Compute proportions of states at each future time."""
-    adjacency = check_adjacency(adjacency)
-    num_states = adjacency.shape[0]
-
-    composition = np.zeros((H, num_states))
-
-    if len(C) == 0:
-        return composition
-
-    for path in C:
-        for h, state in enumerate(path):
-            composition[h, state - 1] += 1
-
-    composition = composition / len(C)
-
-    return composition
+    return [
+        row.candidate
+        for row in original_iblock_table(
+            history,
+            horizon,
+            adjacency,
+            max_permutations=max_permutations,
+        )
+        if row.p_value > alpha
+    ]
 
 
-def run_all_methods(
-    history,
-    horizon,
-    alpha,
-    adjacency,
-    max_permutations=None,
-    random_seed=123,
-    cp_plus_one_anchor=1,
-):
-    """Run likelihood, original i-block CP, and CP+1 for one setup."""
-    random.seed(random_seed)
+def _stable_cardinality_weights(log_group_sizes: Sequence[float]) -> list[float]:
+    """Normalize log cardinalities for one fixed original candidate."""
+    if len(log_group_sizes) == 0:
+        raise ValueError("at least one log group size is required.")
 
-    H = horizon
+    if not all(math.isfinite(value) for value in log_group_sizes):
+        raise ValueError("log group sizes must be finite.")
 
-    C_like = likelihood_prediction_set(history, H, alpha, adjacency)
-    C_cp = iblock_cp_prediction_set(
+    max_log_size = max(log_group_sizes)
+    raw_weights = [math.exp(value - max_log_size) for value in log_group_sizes]
+    raw_total = sum(raw_weights)
+
+    if raw_total <= 0 or not math.isfinite(raw_total):
+        raise ValueError("could not normalize cardinality weights.")
+
+    return [weight / raw_total for weight in raw_weights]
+
+
+def auxiliary_candidate_table(
+    history: SequenceLike,
+    horizon: int,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+) -> list[AuxiliaryDiagnostic]:
+    """Return all one-auxiliary-state diagnostic rows with cardinality weights."""
+    if horizon < 1:
+        raise ValueError("horizon must be positive for auxiliary candidates.")
+
+    adjacency_array = check_adjacency(adjacency)
+    history_list = check_sequence(history, adjacency_array)
+    original_candidates = enumerate_paths(history_list[-1], horizon, adjacency_array)
+    rows: list[AuxiliaryDiagnostic] = []
+
+    for original_candidate in original_candidates:
+        base_rows: list[IBlockDiagnostic] = []
+        auxiliary_states = allowed_next(original_candidate[-1], adjacency_array)
+
+        for auxiliary_state in auxiliary_states:
+            extended_candidate = original_candidate + (auxiliary_state,)
+            base_rows.append(
+                iblock_candidate_diagnostic(
+                    history_list,
+                    extended_candidate,
+                    adjacency_array,
+                    max_permutations=max_permutations,
+                )
+            )
+
+        weights = _stable_cardinality_weights(
+            [row.log_full_group_size for row in base_rows]
+        )
+
+        for diagnostic, weight in zip(base_rows, weights):
+            rows.append(
+                AuxiliaryDiagnostic(
+                    original_candidate=original_candidate,
+                    auxiliary_state=diagnostic.candidate[-1],
+                    extended_candidate=diagnostic.candidate,
+                    anchor_state=diagnostic.anchor_state,
+                    p_value=diagnostic.p_value,
+                    n_permutable_blocks=diagnostic.n_permutable_blocks,
+                    log_full_group_size=diagnostic.log_full_group_size,
+                    full_group_size=diagnostic.full_group_size,
+                    n_permutations_evaluated=diagnostic.n_permutations_evaluated,
+                    normalized_cardinality_weight=weight,
+                )
+            )
+
+    return rows
+
+
+def cardinality_weighted_auxiliary_cp(
+    history: SequenceLike,
+    horizon: int,
+    alpha: float,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+) -> list[AggregatedCandidateResult]:
+    """Aggregate extended p-values using normalized full-cardinality weights.
+
+    For each original candidate y,
+        q_tilde(y) = sum_u weight(y, u) * p_block(y, u),
+    where weight(y, u) is based on the full group size |Pi(y, u)| = D(y, u)!.
+    """
+    if alpha < 0 or alpha > 1:
+        raise ValueError("alpha must be between 0 and 1.")
+
+    auxiliary_rows = auxiliary_candidate_table(
         history,
-        H,
-        alpha,
+        horizon,
         adjacency,
         max_permutations=max_permutations,
     )
-    C_plus_one = cp_plus_one_prediction_set(
-        history,
-        H,
-        alpha,
-        adjacency,
-        anchor_state=cp_plus_one_anchor,
-        max_permutations=max_permutations,
-    )
 
-    candidate_paths = enumerate_paths(history[-1], H, adjacency)
+    grouped_rows: dict[Path, list[AuxiliaryDiagnostic]] = {}
+    for row in auxiliary_rows:
+        grouped_rows.setdefault(row.original_candidate, []).append(row)
 
-    results = {
-        "history": list(history),
-        "horizon": H,
-        "alpha": alpha,
-        "adjacency": check_adjacency(adjacency),
-        "candidate_paths": candidate_paths,
-        "likelihood": C_like,
-        "original_iblock": C_cp,
-        "cp_plus_one": C_plus_one,
-        "state_composition": {
-            "likelihood": state_composition(C_like, H, adjacency),
-            "original_iblock": state_composition(C_cp, H, adjacency),
-            "cp_plus_one": state_composition(C_plus_one, H, adjacency),
-        },
-    }
+    aggregated_results: list[AggregatedCandidateResult] = []
+    for original_candidate, rows in grouped_rows.items():
+        q_tilde = sum(
+            row.normalized_cardinality_weight * row.p_value
+            for row in rows
+        )
 
-    return results
+        aggregated_results.append(
+            AggregatedCandidateResult(
+                original_candidate=original_candidate,
+                q_tilde=q_tilde,
+                included=q_tilde > alpha,
+                auxiliary_rows=tuple(rows),
+            )
+        )
 
-
-def print_prediction_set_summary(name, C):
-    """Print a compact prediction-set summary."""
-    print(f"{name}: size = {len(C)}")
-
-    if len(C) <= 20:
-        print(f"  paths = {C}")
-    else:
-        print(f"  first 10 paths = {C[:10]}")
+    return aggregated_results
