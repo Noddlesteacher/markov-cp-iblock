@@ -10,6 +10,7 @@ experiments can be edited and rerun quickly.
 markov-cp-iblock/
 ├── README.md
 ├── markov_cp_routines.py
+├── quick_meeting_demo.py
 ├── run_demo.py
 ├── requirements.txt
 └── tests/
@@ -19,8 +20,12 @@ markov-cp-iblock/
 `markov_cp_routines.py` contains reusable mathematical routines only. It has no
 experiment-specific histories, plotting code, or giant method wrapper.
 
-`run_demo.py` contains the current dense three-state experiments and the
-user-editable inputs near the top of the file.
+`run_demo.py` is the more detailed diagnostic demo. It prints the original
+i-block table, all auxiliary rows, the comparison table, and repeated-seed
+summaries.
+
+`quick_meeting_demo.py` is the fastest live-meeting demo. It is meant for
+quickly editing one fixed history and a short list of random seeds.
 
 ## Current Research Setting
 
@@ -103,7 +108,23 @@ quantity `log_full_group_size = lgamma(D + 1)`. They do not use
 
 ## Quick Experiment Setup
 
-Run:
+For the fastest live-meeting check, run:
+
+```bash
+python quick_meeting_demo.py
+```
+
+Usually edit only this small control block near the top of
+`quick_meeting_demo.py`:
+
+```python
+HISTORY = [1] * 100
+SEEDS = [1, 2, 3]
+ALPHA = 0.20
+MAX_PERMUTATIONS = 500
+```
+
+For a more detailed diagnostic run, use:
 
 ```bash
 python run_demo.py
@@ -114,8 +135,8 @@ top of `run_demo.py`:
 
 ```python
 HISTORY = [1] * 100
-DETAIL_TIE_SEED = 1
-TIE_BREAKING_SEEDS = range(1, 11)
+DETAIL_RANDOM_SEED = 1
+RANDOM_SEEDS = range(1, 11)
 MAX_PERMUTATIONS = 500
 ALPHA = 0.2
 ```
@@ -144,20 +165,30 @@ the cardinality weights, `q_tilde`, and the repeated-seed results.
 The repeated randomized p-values are controlled by:
 
 ```python
-TIE_BREAKING_SEEDS = range(1, 11)
+RANDOM_SEEDS = range(1, 11)
 ```
 
-This prints a table named `p-values from each tie-breaking seed`, with one row
-for each seed and candidate path. For the default `range(1, 11)`, this gives ten
+`RANDOM_SEEDS` in `run_demo.py` and `SEEDS` in `quick_meeting_demo.py` control
+both randomized tie-breaking and sampled block permutations. They should not be
+read as only tie-breaking seeds.
+
+This prints a table named `p-values from each random seed`, with one row for
+each seed and candidate path. For the default `range(1, 11)`, this gives ten
 runs for each candidate path. To run only three repeats while checking code
 quickly, use:
 
 ```python
-TIE_BREAKING_SEEDS = range(1, 4)
+RANDOM_SEEDS = range(1, 4)
 ```
 
 The reusable mathematical code in `markov_cp_routines.py` usually does not need
 to be edited for these quick checks.
+
+Current implementation note: `p_block(y, u)` passes the full extended candidate
+`(y, u)` into the original i-block diagnostic. Therefore, the current
+nonconformity score evaluates the full extended path `(y, u)`. Do not change
+this unless the advisor confirms that `u` should only be used as an anchor while
+the score evaluates only `y`.
 
 ## Built-in Demo Cases
 
@@ -192,7 +223,7 @@ For each case, the script prints:
 Run:
 
 ```bash
-python -m py_compile markov_cp_routines.py run_demo.py
+python -m py_compile markov_cp_routines.py run_demo.py quick_meeting_demo.py
 python -m unittest discover -s tests
 ```
 
