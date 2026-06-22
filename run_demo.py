@@ -15,7 +15,6 @@ import numpy as np
 from markov_cp_routines import (
     AggregatedCandidateResult,
     IBlockDiagnostic,
-    auxiliary_candidate_table,
     cardinality_weighted_auxiliary_cp,
     original_iblock_table,
 )
@@ -37,10 +36,10 @@ MAX_PERMUTATIONS = 500
 HISTORY = [1] * 100
 
 # Change this one number to reproduce one detailed randomized p-value table.
-DETAIL_TIE_SEED = 1
+DETAIL_RANDOM_SEED = 1
 
 # This is the simple repeated-run loop: range(1, 11) gives ten runs.
-TIE_BREAKING_SEEDS = range(1, 11)
+RANDOM_SEEDS = range(1, 11)
 
 # Set this to True only when you want to rerun the two built-in examples.
 RUN_BUILT_IN_CASES = False
@@ -54,7 +53,7 @@ TRAINING_LENGTH = 100
 HISTORY_SEED = 8
 
 
-def set_tie_seed(seed: int) -> None:
+def set_random_seed(seed: int) -> None:
     """Set all randomness used by randomized tie-breaking and sampling."""
     random.seed(seed)
     np.random.seed(seed)
@@ -129,13 +128,13 @@ def print_comparison(
     original_rows: list[IBlockDiagnostic],
     weighted_results: list[AggregatedCandidateResult],
 ) -> None:
-    """Print original vs cardinality-weighted inclusion decisions."""
+    """Print original versus cardinality-weighted inclusion decisions."""
     original_by_candidate = {
         row.candidate: row
         for row in original_rows
     }
 
-    print("\nOriginal vs cardinality-weighted auxiliary CP")
+    print("\nOriginal versus cardinality-weighted auxiliary CP")
     print("y       orig_p    q_tilde   orig_in   new_in")
     print("-" * 50)
 
@@ -157,7 +156,7 @@ def print_seed_by_seed_rows(
 ) -> None:
     """Print the direct for-loop output: one row per seed and candidate."""
     print("\n" + "=" * 88)
-    print(f"{case_name}: p-values from each tie-breaking seed")
+    print(f"{case_name}: p-values from each random seed")
     print("=" * 88)
     print("seed    y       original_p   orig_in   q_tilde    new_in")
     print("-" * 62)
@@ -176,11 +175,11 @@ def print_seed_by_seed_rows(
 def run_detailed_case(case_name: str, history: list[int]) -> None:
     """Run one detailed seed and print every intermediate row."""
     print("\n" + "=" * 88)
-    print(f"{case_name}: detailed diagnostic, tie seed = {DETAIL_TIE_SEED}")
+    print(f"{case_name}: detailed diagnostic, random seed = {DETAIL_RANDOM_SEED}")
     print("=" * 88)
     print_history_summary(history)
 
-    set_tie_seed(DETAIL_TIE_SEED)
+    set_random_seed(DETAIL_RANDOM_SEED)
     original_rows = original_iblock_table(
         history,
         HORIZON,
@@ -188,7 +187,7 @@ def run_detailed_case(case_name: str, history: list[int]) -> None:
         max_permutations=MAX_PERMUTATIONS,
     )
 
-    set_tie_seed(DETAIL_TIE_SEED)
+    set_random_seed(DETAIL_RANDOM_SEED)
     weighted_results = cardinality_weighted_auxiliary_cp(
         history,
         HORIZON,
@@ -201,17 +200,9 @@ def run_detailed_case(case_name: str, history: list[int]) -> None:
     print_auxiliary_rows(weighted_results)
     print_comparison(original_rows, weighted_results)
 
-    direct_rows = auxiliary_candidate_table(
-        history,
-        HORIZON,
-        ADJACENCY,
-        max_permutations=MAX_PERMUTATIONS,
-    )
-    print(f"\nDirect auxiliary_candidate_table row count: {len(direct_rows)}")
-
 
 def repeat_case(case_name: str, history: list[int]) -> None:
-    """Repeat the fixed-history experiment over tie-breaking seeds."""
+    """Repeat the fixed-history experiment over random seeds."""
     summaries: dict[tuple[int, ...], dict[str, list[float]]] = defaultdict(
         lambda: {
             "original_p": [],
@@ -222,8 +213,8 @@ def repeat_case(case_name: str, history: list[int]) -> None:
     )
     seed_rows: list[tuple[int, tuple[int, ...], float, bool, float, bool]] = []
 
-    for seed in TIE_BREAKING_SEEDS:
-        set_tie_seed(seed)
+    for seed in RANDOM_SEEDS:
+        set_random_seed(seed)
         original_rows = original_iblock_table(
             history,
             HORIZON,
@@ -231,7 +222,7 @@ def repeat_case(case_name: str, history: list[int]) -> None:
             max_permutations=MAX_PERMUTATIONS,
         )
 
-        set_tie_seed(seed)
+        set_random_seed(seed)
         weighted_results = cardinality_weighted_auxiliary_cp(
             history,
             HORIZON,
@@ -266,7 +257,7 @@ def repeat_case(case_name: str, history: list[int]) -> None:
     print_seed_by_seed_rows(case_name, seed_rows)
 
     print("\n" + "=" * 88)
-    print(f"{case_name}: repeated over tie seeds {list(TIE_BREAKING_SEEDS)}")
+    print(f"{case_name}: repeated over random seeds {list(RANDOM_SEEDS)}")
     print("=" * 88)
     print("y       mean_orig_p   orig_freq   mean_q_tilde   new_freq")
     print("-" * 62)
@@ -294,7 +285,7 @@ def main() -> None:
     print(f"HORIZON = {HORIZON}")
     print(f"ALPHA = {ALPHA}")
     print(f"MAX_PERMUTATIONS = {MAX_PERMUTATIONS}")
-    print(f"DETAIL_TIE_SEED = {DETAIL_TIE_SEED}")
+    print(f"DETAIL_RANDOM_SEED = {DETAIL_RANDOM_SEED}")
 
     if RUN_BUILT_IN_CASES:
         mixed_history = make_mixed_history()
