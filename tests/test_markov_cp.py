@@ -192,6 +192,55 @@ class MarkovCPRoutineTests(unittest.TestCase):
         ]
         self.assertEqual(first_values, second_values)
 
+    def test_same_external_seed_reproduces_auxiliary_rows(self):
+        history = [1, 2, 3, 1, 2, 1, 3]
+
+        random.seed(123)
+        first = m.auxiliary_candidate_table(
+            history,
+            horizon=1,
+            adjacency=DENSE_ADJACENCY,
+            max_permutations=30,
+        )
+
+        random.seed(123)
+        second = m.auxiliary_candidate_table(
+            history,
+            horizon=1,
+            adjacency=DENSE_ADJACENCY,
+            max_permutations=30,
+        )
+
+        first_values = [
+            (
+                row.original_candidate,
+                row.auxiliary_state,
+                row.extended_candidate,
+                round(row.p_value, 12),
+                row.n_permutable_blocks,
+                round(row.log_full_group_size, 12),
+                row.full_group_size,
+                row.n_permutations_evaluated,
+                round(row.normalized_cardinality_weight, 12),
+            )
+            for row in first
+        ]
+        second_values = [
+            (
+                row.original_candidate,
+                row.auxiliary_state,
+                row.extended_candidate,
+                round(row.p_value, 12),
+                row.n_permutable_blocks,
+                round(row.log_full_group_size, 12),
+                row.full_group_size,
+                row.n_permutations_evaluated,
+                round(row.normalized_cardinality_weight, 12),
+            )
+            for row in second
+        ]
+        self.assertEqual(first_values, second_values)
+
     def test_core_signatures_do_not_take_random_seed(self):
         functions = [
             m.iblock_candidate_diagnostic,
@@ -216,7 +265,24 @@ class MarkovCPRoutineTests(unittest.TestCase):
         )
 
         self.assertIn("Editable history", completed.stdout)
-        self.assertIn("Direct auxiliary_candidate_table row count: 9", completed.stdout)
+        self.assertIn("Auxiliary extended-candidate table", completed.stdout)
+        self.assertIn("Original versus cardinality-weighted auxiliary CP", completed.stdout)
+
+    def test_quick_meeting_demo_completes(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            [sys.executable, "quick_meeting_demo.py"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        self.assertIn("seed=1", completed.stdout)
+        self.assertIn("summary across seeds", completed.stdout)
+        self.assertIn("q_tilde", completed.stdout)
+        self.assertIn("(1,1)", completed.stdout)
 
 
 if __name__ == "__main__":
