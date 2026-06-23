@@ -19,8 +19,8 @@ from markov_cp_routines import cardinality_weighted_auxiliary_cp
 # Meeting controls
 # ---------------------------------------------------------------------
 
-HISTORY = [1] * 100
-SEEDS = [1, 2, 3]
+HISTORY = [1,2] * 5
+SEEDS = range(1)
 ALPHA = 0.20
 MAX_PERMUTATIONS = 500
 
@@ -29,7 +29,7 @@ HORIZON = 1
 
 
 def set_random_seed(seed: int) -> None:
-    """Set randomness for randomized tie-breaking and sampled permutations."""
+    """Set randomness used when sampled block permutations are drawn."""
     random.seed(seed)
     np.random.seed(seed)
 
