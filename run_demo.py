@@ -35,7 +35,7 @@ MAX_PERMUTATIONS = 500
 # Put the observed training history here.
 HISTORY = [1] * 100
 
-# Change this one number to reproduce one detailed randomized p-value table.
+# Change this one number to reproduce one detailed sampled-permutation table.
 DETAIL_RANDOM_SEED = 1
 
 # This is the simple repeated-run loop: range(1, 11) gives ten runs.
@@ -54,7 +54,7 @@ HISTORY_SEED = 8
 
 
 def set_random_seed(seed: int) -> None:
-    """Set all randomness used by randomized tie-breaking and sampling."""
+    """Set randomness used when sampled block permutations are drawn."""
     random.seed(seed)
     np.random.seed(seed)
 
