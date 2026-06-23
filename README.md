@@ -162,15 +162,15 @@ python run_demo.py
 The output prints the three original candidates, all nine extended candidates,
 the cardinality weights, `q_tilde`, and the repeated-seed results.
 
-The repeated randomized p-values are controlled by:
+The repeated seed-dependent p-values are controlled by:
 
 ```python
 RANDOM_SEEDS = range(1, 11)
 ```
 
 `RANDOM_SEEDS` in `run_demo.py` and `SEEDS` in `quick_meeting_demo.py` control
-both randomized tie-breaking and sampled block permutations. They should not be
-read as only tie-breaking seeds.
+the sampled block permutations when not all permutations are evaluated. They
+should not be read as only tie-breaking seeds.
 
 This prints a table named `p-values from each random seed`, with one row for
 each seed and candidate path. For the default `range(1, 11)`, this gives ten
