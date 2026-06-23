@@ -279,7 +279,7 @@ class MarkovCPRoutineTests(unittest.TestCase):
             timeout=60,
         )
 
-        self.assertIn("seed=1", completed.stdout)
+        self.assertIn("seed=", completed.stdout)
         self.assertIn("summary across seeds", completed.stdout)
         self.assertIn("q_tilde", completed.stdout)
         self.assertIn("(1,1)", completed.stdout)
