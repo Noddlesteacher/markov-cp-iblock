@@ -375,7 +375,8 @@ def iblock_candidate_diagnostic(
     tolerance = 1e-12
     n_greater = sum(score > identity_score + tolerance for score in scores)
     n_equal = sum(abs(score - identity_score) <= tolerance for score in scores)
-    p_value = (n_greater + random.random() * n_equal) / len(scores)
+    # Conservative tie handling: tied scores count toward the p-value.
+    p_value = (n_greater + n_equal) / len(scores)
     log_full_group_size, full_group_size = permutation_group_summary(
         n_permutable_blocks
     )
@@ -421,7 +422,7 @@ def original_iblock_prediction_set(
     adjacency: Sequence[Sequence[int]] | np.ndarray,
     max_permutations: int | None = None,
 ) -> list[Path]:
-    """Return original i-block candidates whose randomized p-value exceeds alpha."""
+    """Return original i-block candidates whose p-value exceeds alpha."""
     if alpha < 0 or alpha > 1:
         raise ValueError("alpha must be between 0 and 1.")
 
