@@ -1,9 +1,9 @@
 """
-Quick demo for dense three-state Markov i-block experiments.
+Detailed demo for dense three-state Markov i-block experiments.
 
-For a new experiment, edit the "Quick experiment controls" block below, then run:
-
-    python run_demo.py
+For a quick live-meeting edit, use quick_meeting_demo.py. This script runs the
+four fixed diagnostic cases requested for comparing original i-block CP,
+permutation-count (D!) weighting, and i-block-count (D) weighting.
 """
 
 from collections import Counter, defaultdict
@@ -15,56 +15,52 @@ import numpy as np
 from markov_cp_routines import (
     AggregatedCandidateResult,
     IBlockDiagnostic,
-    cardinality_weighted_auxiliary_cp,
+    aggregate_auxiliary_rows,
+    auxiliary_candidate_table,
     original_iblock_table,
 )
 
 
 # ---------------------------------------------------------------------
-# Quick experiment controls
-#
-# For most experiments, edit only this block.
+# Experiment controls
 # ---------------------------------------------------------------------
 
 NUM_STATES = 3
 ADJACENCY = np.ones((NUM_STATES, NUM_STATES), dtype=int)
-HORIZON = 1
-ALPHA = 0.2
+HORIZONS = (1, 2)
+ALPHA = 0.20
 MAX_PERMUTATIONS = 500
-
-# Put the observed training history here.
-HISTORY = [1] * 100
-
-# Change this one number to reproduce one detailed sampled-permutation table.
-DETAIL_RANDOM_SEED = 1
-
-# This is the simple repeated-run loop: range(1, 11) gives ten runs.
-RANDOM_SEEDS = range(1, 11)
-
-# Set this to True only when you want to rerun the two built-in examples.
-RUN_BUILT_IN_CASES = False
-
-
-# ---------------------------------------------------------------------
-# Optional built-in histories
-# ---------------------------------------------------------------------
 
 TRAINING_LENGTH = 100
 HISTORY_SEED = 8
+DETAIL_RANDOM_SEED = 1
+RANDOM_SEEDS = range(1, 4)
+RUN_REPEATED_SEEDS = False
+RANDOMIZED_TIES = False
 
 
 def set_random_seed(seed: int) -> None:
-    """Set randomness used when sampled block permutations are drawn."""
+    """Set randomness used by sampled block permutations and optional tie draws."""
     random.seed(seed)
     np.random.seed(seed)
 
 
-def make_mixed_history() -> list[int]:
-    """Generate one fixed random/mixed history and then hold it fixed."""
-    random.seed(HISTORY_SEED)
+def make_random_history() -> list[int]:
+    """Generate one fixed random history without changing the global RNG."""
+    rng = random.Random(HISTORY_SEED)
     return [
-        random.randint(1, NUM_STATES)
+        rng.randint(1, NUM_STATES)
         for _ in range(TRAINING_LENGTH)
+    ]
+
+
+def experiment_cases() -> list[tuple[str, list[int]]]:
+    """Return the four fixed histories used in the detailed demo."""
+    return [
+        ("Case 1: same-state history", [1] * 100),
+        ("Case 2: fixed random history", make_random_history()),
+        ("Case 3: two-cycle history", [1, 2] * 100),
+        ("Case 4: three-cycle history", [1, 2, 3] * 100),
     ]
 
 
@@ -73,11 +69,25 @@ def path_text(path: tuple[int, ...]) -> str:
     return "(" + ",".join(str(state) for state in path) + ")"
 
 
+def set_text(paths: list[tuple[int, ...]]) -> str:
+    """Format a prediction set of original candidate paths."""
+    if len(paths) == 0:
+        return "{}"
+    return "{" + ", ".join(path_text(path) for path in sorted(paths)) + "}"
+
+
 def group_size_text(value: int | None) -> str:
-    """Show small exact group sizes and mark large factorials by log size."""
+    """Show small exact group sizes and mark large factorials compactly."""
     if value is None:
         return "large"
     return str(value)
+
+
+def result_by_candidate(
+    results: list[AggregatedCandidateResult],
+) -> dict[tuple[int, ...], AggregatedCandidateResult]:
+    """Index aggregated results by original candidate path."""
+    return {result.original_candidate: result for result in results}
 
 
 def print_history_summary(history: list[int]) -> None:
@@ -91,11 +101,11 @@ def print_history_summary(history: list[int]) -> None:
 def print_original_table(rows: list[IBlockDiagnostic]) -> None:
     """Print original i-block candidate p-values and cardinalities."""
     print("\nOriginal i-block candidate table")
-    print("y       p_block      D    log|Pi|   |Pi|      n_eval")
-    print("-" * 62)
+    print("y          p_block      D    log|Pi|   |Pi|      n_eval")
+    print("-" * 66)
     for row in rows:
         print(
-            f"{path_text(row.candidate):<7}"
+            f"{path_text(row.candidate):<10}"
             f"{row.p_value:>9.4f}"
             f"{row.n_permutable_blocks:>7}"
             f"{row.log_full_group_size:>10.2f}"
@@ -104,198 +114,238 @@ def print_original_table(rows: list[IBlockDiagnostic]) -> None:
         )
 
 
-def print_auxiliary_rows(results: list[AggregatedCandidateResult]) -> None:
-    """Print all extended-candidate rows used by q_tilde."""
-    print("\nAuxiliary extended-candidate table")
-    print("y       u   z       p_block      D    log|Pi|   weight    n_eval")
-    print("-" * 76)
+def print_auxiliary_rows(
+    perm_results: list[AggregatedCandidateResult],
+    iblock_results: list[AggregatedCandidateResult],
+) -> None:
+    """Print all extended-candidate rows used by both weighted methods."""
+    iblock_by_candidate = result_by_candidate(iblock_results)
 
-    for result in results:
-        for row in result.auxiliary_rows:
+    print("\nAuxiliary extended-candidate table")
+    print(
+        "y          u   z          p_block      D    log|Pi|"
+        "   perm_w    perm_c   iblock_w  iblock_c   n_eval"
+    )
+    print("-" * 110)
+
+    for perm_result in perm_results:
+        iblock_result = iblock_by_candidate[perm_result.original_candidate]
+        iblock_rows = {
+            row.auxiliary_state: row
+            for row in iblock_result.auxiliary_rows
+        }
+
+        for row in perm_result.auxiliary_rows:
+            iblock_row = iblock_rows[row.auxiliary_state]
+            perm_contrib = row.normalized_cardinality_weight * row.p_value
+            iblock_contrib = iblock_row.normalized_iblock_weight * iblock_row.p_value
             print(
-                f"{path_text(row.original_candidate):<7}"
+                f"{path_text(row.original_candidate):<10}"
                 f"{row.auxiliary_state:>2}"
-                f"{path_text(row.extended_candidate):>8}"
+                f"{path_text(row.extended_candidate):>11}"
                 f"{row.p_value:>11.4f}"
                 f"{row.n_permutable_blocks:>7}"
                 f"{row.log_full_group_size:>10.2f}"
                 f"{row.normalized_cardinality_weight:>9.4f}"
-                f"{row.n_permutations_evaluated:>10}"
+                f"{perm_contrib:>10.4f}"
+                f"{row.normalized_iblock_weight:>10.4f}"
+                f"{iblock_contrib:>10.4f}"
+                f"{row.n_permutations_evaluated:>9}"
             )
 
 
 def print_comparison(
     original_rows: list[IBlockDiagnostic],
-    weighted_results: list[AggregatedCandidateResult],
+    perm_results: list[AggregatedCandidateResult],
+    iblock_results: list[AggregatedCandidateResult],
 ) -> None:
-    """Print original versus cardinality-weighted inclusion decisions."""
-    original_by_candidate = {
-        row.candidate: row
-        for row in original_rows
-    }
+    """Print original versus both auxiliary weighted inclusion decisions."""
+    original_by_candidate = {row.candidate: row for row in original_rows}
+    iblock_by_candidate = result_by_candidate(iblock_results)
 
-    print("\nOriginal versus cardinality-weighted auxiliary CP")
-    print("y       orig_p    q_tilde   orig_in   new_in")
-    print("-" * 50)
+    print("\nOriginal versus auxiliary weighted CP")
+    print("y          original_p   orig_in   q_perm   perm_in   q_iblock   iblock_in")
+    print("-" * 78)
 
-    for result in weighted_results:
-        original_row = original_by_candidate[result.original_candidate]
+    for perm_result in perm_results:
+        candidate = perm_result.original_candidate
+        original_row = original_by_candidate[candidate]
+        iblock_result = iblock_by_candidate[candidate]
         original_included = original_row.p_value > ALPHA
         print(
-            f"{path_text(result.original_candidate):<7}"
-            f"{original_row.p_value:>8.4f}"
-            f"{result.q_tilde:>10.4f}"
+            f"{path_text(candidate):<10}"
+            f"{original_row.p_value:>10.4f}"
             f"{str(original_included):>10}"
-            f"{str(result.included):>9}"
+            f"{perm_result.q_tilde:>9.4f}"
+            f"{str(perm_result.included):>10}"
+            f"{iblock_result.q_tilde:>11.4f}"
+            f"{str(iblock_result.included):>12}"
         )
 
 
-def print_seed_by_seed_rows(
-    case_name: str,
-    seed_rows: list[tuple[int, tuple[int, ...], float, bool, float, bool]],
+def print_final_sets(
+    original_rows: list[IBlockDiagnostic],
+    perm_results: list[AggregatedCandidateResult],
+    iblock_results: list[AggregatedCandidateResult],
 ) -> None:
-    """Print the direct for-loop output: one row per seed and candidate."""
-    print("\n" + "=" * 88)
-    print(f"{case_name}: p-values from each random seed")
-    print("=" * 88)
-    print("seed    y       original_p   orig_in   q_tilde    new_in")
-    print("-" * 62)
+    """Print final prediction sets explicitly."""
+    original_set = sorted(row.candidate for row in original_rows if row.p_value > ALPHA)
+    perm_set = sorted(
+        result.original_candidate
+        for result in perm_results
+        if result.included
+    )
+    iblock_set = sorted(
+        result.original_candidate
+        for result in iblock_results
+        if result.included
+    )
 
-    for seed, candidate, original_p, original_included, q_tilde, new_included in seed_rows:
-        print(
-            f"{seed:<8}"
-            f"{path_text(candidate):<8}"
-            f"{original_p:>10.4f}"
-            f"{str(original_included):>10}"
-            f"{q_tilde:>10.4f}"
-            f"{str(new_included):>10}"
-        )
+    print("\nFINAL CP SETS")
+    print(f"Original i-block CP set: {set_text(original_set)}")
+    print(f"Permutation-count (D!) weighted CP set: {set_text(perm_set)}")
+    print(f"I-block-count (D) weighted CP set: {set_text(iblock_set)}")
 
 
-def run_detailed_case(case_name: str, history: list[int]) -> None:
+def run_detailed_case(case_name: str, history: list[int], horizon: int) -> None:
     """Run one detailed seed and print every intermediate row."""
-    print("\n" + "=" * 88)
-    print(f"{case_name}: detailed diagnostic, random seed = {DETAIL_RANDOM_SEED}")
-    print("=" * 88)
+    print("\n" + "=" * 100)
+    print(f"{case_name}; horizon={horizon}; detail seed={DETAIL_RANDOM_SEED}")
+    print("=" * 100)
     print_history_summary(history)
 
     set_random_seed(DETAIL_RANDOM_SEED)
     original_rows = original_iblock_table(
         history,
-        HORIZON,
+        horizon,
         ADJACENCY,
         max_permutations=MAX_PERMUTATIONS,
+        randomized_ties=RANDOMIZED_TIES,
     )
 
     set_random_seed(DETAIL_RANDOM_SEED)
-    weighted_results = cardinality_weighted_auxiliary_cp(
+    auxiliary_rows = auxiliary_candidate_table(
         history,
-        HORIZON,
-        ALPHA,
+        horizon,
         ADJACENCY,
         max_permutations=MAX_PERMUTATIONS,
+        randomized_ties=RANDOMIZED_TIES,
     )
 
+    perm_results = aggregate_auxiliary_rows(
+        auxiliary_rows,
+        ALPHA,
+        weighting="permutation_count",
+    )
+    iblock_results = aggregate_auxiliary_rows(
+        auxiliary_rows,
+        ALPHA,
+        weighting="iblock_count",
+    )
+
+    print(f"number of original candidate paths: {len(original_rows)}")
+    print(f"number of auxiliary extended-candidate rows: {len(auxiliary_rows)}")
     print_original_table(original_rows)
-    print_auxiliary_rows(weighted_results)
-    print_comparison(original_rows, weighted_results)
+    print_auxiliary_rows(perm_results, iblock_results)
+    print_comparison(original_rows, perm_results, iblock_results)
+    print_final_sets(original_rows, perm_results, iblock_results)
 
 
-def repeat_case(case_name: str, history: list[int]) -> None:
-    """Repeat the fixed-history experiment over random seeds."""
+def repeat_case(case_name: str, history: list[int], horizon: int) -> None:
+    """Optionally repeat a fixed-history experiment over random seeds."""
     summaries: dict[tuple[int, ...], dict[str, list[float]]] = defaultdict(
         lambda: {
             "original_p": [],
             "original_included": [],
-            "q_tilde": [],
-            "new_included": [],
+            "q_perm": [],
+            "perm_included": [],
+            "q_iblock": [],
+            "iblock_included": [],
         }
     )
-    seed_rows: list[tuple[int, tuple[int, ...], float, bool, float, bool]] = []
 
     for seed in RANDOM_SEEDS:
         set_random_seed(seed)
         original_rows = original_iblock_table(
             history,
-            HORIZON,
+            horizon,
             ADJACENCY,
             max_permutations=MAX_PERMUTATIONS,
+            randomized_ties=RANDOMIZED_TIES,
         )
 
         set_random_seed(seed)
-        weighted_results = cardinality_weighted_auxiliary_cp(
+        auxiliary_rows = auxiliary_candidate_table(
             history,
-            HORIZON,
-            ALPHA,
+            horizon,
             ADJACENCY,
             max_permutations=MAX_PERMUTATIONS,
+            randomized_ties=RANDOMIZED_TIES,
         )
 
-        original_by_candidate = {
-            row.candidate: row
-            for row in original_rows
-        }
+        perm_results = aggregate_auxiliary_rows(
+            auxiliary_rows,
+            ALPHA,
+            weighting="permutation_count",
+        )
+        iblock_results = aggregate_auxiliary_rows(
+            auxiliary_rows,
+            ALPHA,
+            weighting="iblock_count",
+        )
+        original_by_candidate = {row.candidate: row for row in original_rows}
+        iblock_by_candidate = result_by_candidate(iblock_results)
 
-        for result in weighted_results:
-            original_row = original_by_candidate[result.original_candidate]
-            bucket = summaries[result.original_candidate]
+        for perm_result in perm_results:
+            candidate = perm_result.original_candidate
+            original_row = original_by_candidate[candidate]
+            iblock_result = iblock_by_candidate[candidate]
+            bucket = summaries[candidate]
             bucket["original_p"].append(original_row.p_value)
             bucket["original_included"].append(float(original_row.p_value > ALPHA))
-            bucket["q_tilde"].append(result.q_tilde)
-            bucket["new_included"].append(float(result.included))
-            seed_rows.append(
-                (
-                    seed,
-                    result.original_candidate,
-                    original_row.p_value,
-                    original_row.p_value > ALPHA,
-                    result.q_tilde,
-                    result.included,
-                )
-            )
+            bucket["q_perm"].append(perm_result.q_tilde)
+            bucket["perm_included"].append(float(perm_result.included))
+            bucket["q_iblock"].append(iblock_result.q_tilde)
+            bucket["iblock_included"].append(float(iblock_result.included))
 
-    print_seed_by_seed_rows(case_name, seed_rows)
-
-    print("\n" + "=" * 88)
-    print(f"{case_name}: repeated over random seeds {list(RANDOM_SEEDS)}")
-    print("=" * 88)
-    print("y       mean_orig_p   orig_freq   mean_q_tilde   new_freq")
-    print("-" * 62)
+    print("\n" + "=" * 100)
+    print(f"{case_name}; horizon={horizon}; repeated over seeds {list(RANDOM_SEEDS)}")
+    print("=" * 100)
+    print(
+        "y          mean_orig_p   orig_freq   mean_q_perm   perm_freq"
+        "   mean_q_iblock   iblock_freq"
+    )
+    print("-" * 96)
 
     for candidate in sorted(summaries):
         values = summaries[candidate]
         print(
-            f"{path_text(candidate):<7}"
+            f"{path_text(candidate):<10}"
             f"{mean(values['original_p']):>12.4f}"
             f"{mean(values['original_included']):>12.2f}"
-            f"{mean(values['q_tilde']):>15.4f}"
-            f"{mean(values['new_included']):>11.2f}"
+            f"{mean(values['q_perm']):>14.4f}"
+            f"{mean(values['perm_included']):>12.2f}"
+            f"{mean(values['q_iblock']):>16.4f}"
+            f"{mean(values['iblock_included']):>14.2f}"
         )
-
-
-def run_case(case_name: str, history: list[int]) -> None:
-    """Run the detailed and repeated views for one fixed history."""
-    run_detailed_case(case_name, history)
-    repeat_case(case_name, history)
 
 
 def main() -> None:
     print("Dense three-state Markov i-block experiments")
     print(f"NUM_STATES = {NUM_STATES}")
-    print(f"HORIZON = {HORIZON}")
+    print(f"HORIZONS = {HORIZONS}")
     print(f"ALPHA = {ALPHA}")
     print(f"MAX_PERMUTATIONS = {MAX_PERMUTATIONS}")
     print(f"DETAIL_RANDOM_SEED = {DETAIL_RANDOM_SEED}")
+    print(f"RANDOMIZED_TIES = {RANDOMIZED_TIES}")
+    print(f"RUN_REPEATED_SEEDS = {RUN_REPEATED_SEEDS}")
+    print(f"HISTORY_SEED = {HISTORY_SEED}")
 
-    if RUN_BUILT_IN_CASES:
-        mixed_history = make_mixed_history()
-        dominant_history = [1] * TRAINING_LENGTH
-
-        print(f"HISTORY_SEED = {HISTORY_SEED}")
-        run_case("Case 1: fixed random/mixed history", mixed_history)
-        run_case("Case 2: dominant-state history", dominant_history)
-    else:
-        run_case("Editable history", HISTORY)
+    for case_name, history in experiment_cases():
+        for horizon in HORIZONS:
+            run_detailed_case(case_name, history, horizon)
+            if RUN_REPEATED_SEEDS:
+                repeat_case(case_name, history, horizon)
 
 
 if __name__ == "__main__":
