@@ -2,8 +2,8 @@
 Reusable routines for finite-state Markov-chain i-block conformal experiments.
 
 The active research workflow for this branch is intentionally small:
-candidate diagnostics for the original i-block procedure, plus a dense
-three-state cardinality-weighted auxiliary-state experiment.
+candidate diagnostics for the original i-block procedure, plus dense
+three-state auxiliary-state experiments.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from dataclasses import dataclass as _dataclass
 from itertools import permutations
 import math
 import random
-from typing import Sequence
+from typing import Literal, Sequence
 
 import numpy as np
 
@@ -20,6 +20,7 @@ import numpy as np
 State = int
 Path = tuple[State, ...]
 SequenceLike = Sequence[State]
+WeightingScheme = Literal["permutation_count", "iblock_count"]
 
 MAX_EXACT_PERMUTATIONS = 50_000
 MAX_FACTORIAL_INT_D = 20
@@ -40,7 +41,7 @@ class IBlockDiagnostic:
 
 @_dataclass(frozen=True)
 class AuxiliaryDiagnostic:
-    """One extended candidate row for the cardinality-weighted method."""
+    """One extended candidate row for the auxiliary weighted methods."""
 
     original_candidate: Path
     auxiliary_state: State
@@ -52,6 +53,7 @@ class AuxiliaryDiagnostic:
     full_group_size: int | None
     n_permutations_evaluated: int
     normalized_cardinality_weight: float
+    normalized_iblock_weight: float
 
 
 @_dataclass(frozen=True)
@@ -331,8 +333,15 @@ def iblock_candidate_diagnostic(
     candidate: SequenceLike,
     adjacency: Sequence[Sequence[int]] | np.ndarray,
     max_permutations: int | None = None,
+    randomized_ties: bool = False,
 ) -> IBlockDiagnostic:
-    """Compute one original randomized i-block p-value with cardinality details."""
+    """Compute one original i-block p-value with block-count details.
+
+    By default tied nonconformity scores are handled conservatively, which is
+    equivalent to fixing the tie randomizer xi = 1. If randomized_ties=True,
+    xi is sampled from Uniform(0, 1). Random seeds are intentionally controlled
+    by the calling script, not by this core routine.
+    """
     adjacency_array = check_adjacency(adjacency)
     history_list = check_sequence(history, adjacency_array)
     candidate_path = tuple(int(state) for state in candidate)
@@ -375,8 +384,12 @@ def iblock_candidate_diagnostic(
     tolerance = 1e-12
     n_greater = sum(score > identity_score + tolerance for score in scores)
     n_equal = sum(abs(score - identity_score) <= tolerance for score in scores)
-    # Conservative tie handling: tied scores count toward the p-value.
-    p_value = (n_greater + n_equal) / len(scores)
+    if randomized_ties:
+        tie_randomizer = random.random()
+    else:
+        tie_randomizer = 1.0
+
+    p_value = (n_greater + tie_randomizer * n_equal) / len(scores)
     log_full_group_size, full_group_size = permutation_group_summary(
         n_permutable_blocks
     )
@@ -397,6 +410,7 @@ def original_iblock_table(
     horizon: int,
     adjacency: Sequence[Sequence[int]] | np.ndarray,
     max_permutations: int | None = None,
+    randomized_ties: bool = False,
 ) -> list[IBlockDiagnostic]:
     """Return one original i-block diagnostic row for every candidate path."""
     adjacency_array = check_adjacency(adjacency)
@@ -410,6 +424,7 @@ def original_iblock_table(
             candidate,
             adjacency_array,
             max_permutations=max_permutations,
+            randomized_ties=randomized_ties,
         )
         for candidate in candidates
     ]
@@ -421,21 +436,23 @@ def original_iblock_prediction_set(
     alpha: float,
     adjacency: Sequence[Sequence[int]] | np.ndarray,
     max_permutations: int | None = None,
+    randomized_ties: bool = False,
 ) -> list[Path]:
     """Return original i-block candidates whose p-value exceeds alpha."""
     if alpha < 0 or alpha > 1:
         raise ValueError("alpha must be between 0 and 1.")
 
-    return [
+    return sorted(
         row.candidate
         for row in original_iblock_table(
             history,
             horizon,
             adjacency,
             max_permutations=max_permutations,
+            randomized_ties=randomized_ties,
         )
         if row.p_value > alpha
-    ]
+    )
 
 
 def _stable_cardinality_weights(log_group_sizes: Sequence[float]) -> list[float]:
@@ -456,13 +473,41 @@ def _stable_cardinality_weights(log_group_sizes: Sequence[float]) -> list[float]
     return [weight / raw_total for weight in raw_weights]
 
 
+def _normalize_iblock_counts(counts: Sequence[int]) -> list[float]:
+    """Normalize D-counts for the i-block-count weighted rule.
+
+    D counts only middle permutable i-blocks. No pseudocount is added: a row
+    with D = 0 receives exactly zero weight, and the all-zero case is undefined.
+    """
+    if len(counts) == 0:
+        raise ValueError("at least one i-block count is required.")
+
+    if any(count < 0 for count in counts):
+        raise ValueError("i-block counts must be nonnegative.")
+
+    total = sum(counts)
+    if total == 0:
+        raise ValueError(
+            "all auxiliary continuations have zero permutable i-blocks; "
+            "the D-weighted rule is undefined"
+        )
+
+    return [count / total for count in counts]
+
+
 def auxiliary_candidate_table(
     history: SequenceLike,
     horizon: int,
     adjacency: Sequence[Sequence[int]] | np.ndarray,
     max_permutations: int | None = None,
+    randomized_ties: bool = False,
 ) -> list[AuxiliaryDiagnostic]:
-    """Return all one-auxiliary-state diagnostic rows with cardinality weights."""
+    """Return all one-auxiliary-state rows with D! and D weights.
+
+    Each p-value is computed once for the full extended candidate (y, u). The
+    same row can then be aggregated by either permutation-count weights D! or
+    middle-i-block-count weights D.
+    """
     if horizon < 1:
         raise ValueError("horizon must be positive for auxiliary candidates.")
 
@@ -483,14 +528,22 @@ def auxiliary_candidate_table(
                     extended_candidate,
                     adjacency_array,
                     max_permutations=max_permutations,
+                    randomized_ties=randomized_ties,
                 )
             )
 
-        weights = _stable_cardinality_weights(
+        cardinality_weights = _stable_cardinality_weights(
             [row.log_full_group_size for row in base_rows]
         )
+        iblock_weights = _normalize_iblock_counts(
+            [row.n_permutable_blocks for row in base_rows]
+        )
 
-        for diagnostic, weight in zip(base_rows, weights):
+        for diagnostic, cardinality_weight, iblock_weight in zip(
+            base_rows,
+            cardinality_weights,
+            iblock_weights,
+        ):
             rows.append(
                 AuxiliaryDiagnostic(
                     original_candidate=original_candidate,
@@ -502,11 +555,60 @@ def auxiliary_candidate_table(
                     log_full_group_size=diagnostic.log_full_group_size,
                     full_group_size=diagnostic.full_group_size,
                     n_permutations_evaluated=diagnostic.n_permutations_evaluated,
-                    normalized_cardinality_weight=weight,
+                    normalized_cardinality_weight=cardinality_weight,
+                    normalized_iblock_weight=iblock_weight,
                 )
             )
 
     return rows
+
+
+def aggregate_auxiliary_rows(
+    rows: Sequence[AuxiliaryDiagnostic],
+    alpha: float,
+    weighting: WeightingScheme,
+) -> list[AggregatedCandidateResult]:
+    """Aggregate already-computed auxiliary rows under one weighting scheme."""
+    if alpha < 0 or alpha > 1:
+        raise ValueError("alpha must be between 0 and 1.")
+
+    if weighting not in ("permutation_count", "iblock_count"):
+        raise ValueError("weighting must be 'permutation_count' or 'iblock_count'.")
+
+    grouped_rows: dict[Path, list[AuxiliaryDiagnostic]] = {}
+    for row in rows:
+        grouped_rows.setdefault(row.original_candidate, []).append(row)
+
+    aggregated_results: list[AggregatedCandidateResult] = []
+    for original_candidate in sorted(grouped_rows):
+        candidate_rows = tuple(
+            sorted(
+                grouped_rows[original_candidate],
+                key=lambda row: row.auxiliary_state,
+            )
+        )
+
+        if weighting == "permutation_count":
+            q_tilde = sum(
+                row.normalized_cardinality_weight * row.p_value
+                for row in candidate_rows
+            )
+        else:
+            q_tilde = sum(
+                row.normalized_iblock_weight * row.p_value
+                for row in candidate_rows
+            )
+
+        aggregated_results.append(
+            AggregatedCandidateResult(
+                original_candidate=original_candidate,
+                q_tilde=q_tilde,
+                included=q_tilde > alpha,
+                auxiliary_rows=candidate_rows,
+            )
+        )
+
+    return aggregated_results
 
 
 def cardinality_weighted_auxiliary_cp(
@@ -515,12 +617,13 @@ def cardinality_weighted_auxiliary_cp(
     alpha: float,
     adjacency: Sequence[Sequence[int]] | np.ndarray,
     max_permutations: int | None = None,
+    randomized_ties: bool = False,
 ) -> list[AggregatedCandidateResult]:
-    """Aggregate extended p-values using normalized full-cardinality weights.
+    """Aggregate extended p-values using permutation-count D! weights.
 
-    For each original candidate y,
-        q_tilde(y) = sum_u weight(y, u) * p_block(y, u),
-    where weight(y, u) is based on the full group size |Pi(y, u)| = D(y, u)!.
+    This backward-compatible function preserves the original cardinality rule:
+    q_tilde(y) = sum_u weight(y, u) * p_block(y, u), where weight(y, u) is
+    based on the full permutation-group size |Pi(y, u)| = D(y, u)!.
     """
     if alpha < 0 or alpha > 1:
         raise ValueError("alpha must be between 0 and 1.")
@@ -530,26 +633,75 @@ def cardinality_weighted_auxiliary_cp(
         horizon,
         adjacency,
         max_permutations=max_permutations,
+        randomized_ties=randomized_ties,
     )
 
-    grouped_rows: dict[Path, list[AuxiliaryDiagnostic]] = {}
-    for row in auxiliary_rows:
-        grouped_rows.setdefault(row.original_candidate, []).append(row)
+    return aggregate_auxiliary_rows(
+        auxiliary_rows,
+        alpha,
+        weighting="permutation_count",
+    )
 
-    aggregated_results: list[AggregatedCandidateResult] = []
-    for original_candidate, rows in grouped_rows.items():
-        q_tilde = sum(
-            row.normalized_cardinality_weight * row.p_value
-            for row in rows
-        )
 
-        aggregated_results.append(
-            AggregatedCandidateResult(
-                original_candidate=original_candidate,
-                q_tilde=q_tilde,
-                included=q_tilde > alpha,
-                auxiliary_rows=tuple(rows),
-            )
-        )
+def iblock_count_weighted_auxiliary_cp(
+    history: SequenceLike,
+    horizon: int,
+    alpha: float,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+    randomized_ties: bool = False,
+) -> list[AggregatedCandidateResult]:
+    """Aggregate extended p-values using middle-i-block-count D weights."""
+    auxiliary_rows = auxiliary_candidate_table(
+        history,
+        horizon,
+        adjacency,
+        max_permutations=max_permutations,
+        randomized_ties=randomized_ties,
+    )
 
-    return aggregated_results
+    return aggregate_auxiliary_rows(
+        auxiliary_rows,
+        alpha,
+        weighting="iblock_count",
+    )
+
+
+def permutation_count_weighted_prediction_set(
+    history: SequenceLike,
+    horizon: int,
+    alpha: float,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+    randomized_ties: bool = False,
+) -> list[Path]:
+    """Return original candidate paths selected by the D!-weighted rule."""
+    results = cardinality_weighted_auxiliary_cp(
+        history,
+        horizon,
+        alpha,
+        adjacency,
+        max_permutations=max_permutations,
+        randomized_ties=randomized_ties,
+    )
+    return sorted(result.original_candidate for result in results if result.included)
+
+
+def iblock_count_weighted_prediction_set(
+    history: SequenceLike,
+    horizon: int,
+    alpha: float,
+    adjacency: Sequence[Sequence[int]] | np.ndarray,
+    max_permutations: int | None = None,
+    randomized_ties: bool = False,
+) -> list[Path]:
+    """Return original candidate paths selected by the D-weighted rule."""
+    results = iblock_count_weighted_auxiliary_cp(
+        history,
+        horizon,
+        alpha,
+        adjacency,
+        max_permutations=max_permutations,
+        randomized_ties=randomized_ties,
+    )
+    return sorted(result.original_candidate for result in results if result.included)
