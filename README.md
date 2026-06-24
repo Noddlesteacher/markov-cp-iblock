@@ -57,9 +57,9 @@ permutation-group element.
 For each original candidate `y` and one auxiliary state `u`, define the full
 extended candidate:
 
-$$
-z = (y, u).
-$$
+```math
+z = (y, u)
+```
 
 The current implementation passes the full extended candidate `(y,u)` into the
 original i-block diagnostic. Therefore, the current nonconformity score
@@ -69,9 +69,9 @@ only `y`.
 
 For each extended candidate, the code computes:
 
-$$
-p_{\mathrm{block}}(y,u).
-$$
+```math
+p_{\mathrm{block}}(y,u)
+```
 
 The same auxiliary table contains both weights below, so the two weighted
 methods can be compared using exactly the same computed p-values.
@@ -81,27 +81,27 @@ methods can be compared using exactly the same computed p-values.
 This is the old cardinality-weighted method, retained as a comparison method.
 For fixed `y`, its normalized weight is:
 
-$$
+```math
 \omega^{\mathrm{perm}}_{y,u}
 =
-\frac{D_{y,u}!}{\sum_v D_{y,v}!}.
-$$
+\frac{D_{y,u}!}{\sum_{v} D_{y,v}!}
+```
 
 The aggregate is:
 
-$$
-\tilde q_{\mathrm{perm}}(y)
+```math
+\tilde{q}_{\mathrm{perm}}(y)
 =
-\sum_u \omega^{\mathrm{perm}}_{y,u} p_{\mathrm{block}}(y,u).
-$$
+\sum_{u} \omega^{\mathrm{perm}}_{y,u} p_{\mathrm{block}}(y,u)
+```
 
 The corresponding exploratory set is:
 
-$$
+```math
 C_{\mathrm{perm}}
 =
-\{y : \tilde q_{\mathrm{perm}}(y) > \alpha\}.
-$$
+\{ y : \tilde{q}_{\mathrm{perm}}(y) > \alpha \}
+```
 
 The old public wrapper `cardinality_weighted_auxiliary_cp(...)` remains
 available for backward compatibility and uses this D!-weighted rule.
@@ -110,27 +110,27 @@ available for backward compatibility and uses this D!-weighted rule.
 
 The new comparison method weights by the number of middle permutable i-blocks:
 
-$$
+```math
 \omega^{\mathrm{block}}_{y,u}
 =
-\frac{D_{y,u}}{\sum_v D_{y,v}}.
-$$
+\frac{D_{y,u}}{\sum_{v} D_{y,v}}
+```
 
 The aggregate is:
 
-$$
-\tilde q_{\mathrm{block}}(y)
+```math
+\tilde{q}_{\mathrm{block}}(y)
 =
-\sum_u \omega^{\mathrm{block}}_{y,u} p_{\mathrm{block}}(y,u).
-$$
+\sum_{u} \omega^{\mathrm{block}}_{y,u} p_{\mathrm{block}}(y,u)
+```
 
 The corresponding exploratory set is:
 
-$$
+```math
 C_{\mathrm{block}}
 =
-\{y : \tilde q_{\mathrm{block}}(y) > \alpha\}.
-$$
+\{ y : \tilde{q}_{\mathrm{block}}(y) > \alpha \}
+```
 
 No pseudocount is used. If one row has `D = 0`, its D-weight is exactly zero.
 If all auxiliary continuations for a fixed `y` have `D = 0`, the D-weighted rule
@@ -164,15 +164,15 @@ randomized_ties=False
 When `randomized_ties=False`, tied scores are handled conservatively by fixing
 the tie randomizer to `xi = 1`, so:
 
-$$
-p = \frac{n_> + n_=}{n_{\mathrm{eval}}}.
-$$
+```math
+p = \frac{n_{>} + n_{=}}{n_{\mathrm{eval}}}
+```
 
 When `randomized_ties=True`, the code samples `xi` from `Uniform(0,1)` and uses:
 
-$$
-p = \frac{n_> + \xi n_=}{n_{\mathrm{eval}}}.
-$$
+```math
+p = \frac{n_{>} + \xi n_{=}}{n_{\mathrm{eval}}}
+```
 
 No core mathematical function takes a `random_seed` argument. The demo scripts
 set seeds externally. Seeds can still affect sampled block permutations even
