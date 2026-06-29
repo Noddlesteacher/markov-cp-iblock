@@ -27,7 +27,7 @@ from markov_cp_routines import (
 
 HISTORY = [1, 2] * 100
 HORIZON = 1
-SEEDS = [1]
+SEEDS = [1,2]
 ALPHA = 0.20
 MAX_PERMUTATIONS = 500
 RANDOMIZED_TIES = False
