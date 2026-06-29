@@ -159,6 +159,41 @@ def print_final_sets(
     print(f"Permutation-count (D!) weighted CP set: {set_text(perm_set)}")
     print(f"I-block-count (D) weighted CP set: {set_text(iblock_set)}")
 
+    print("\nFINAL CP SET DETAILS")
+    print("method                         y          value")
+    print("-" * 56)
+
+    any_detail = False
+    for row in original_rows:
+        if row.p_value > ALPHA:
+            any_detail = True
+            print(
+                f"{'Original i-block':<31}"
+                f"{path_text(row.candidate):<10}"
+                f"p={row.p_value:.4f}"
+            )
+
+    for result in perm_results:
+        if result.included:
+            any_detail = True
+            print(
+                f"{'Permutation-count (D!)':<31}"
+                f"{path_text(result.original_candidate):<10}"
+                f"q_perm={result.q_tilde:.4f}"
+            )
+
+    for result in iblock_results:
+        if result.included:
+            any_detail = True
+            print(
+                f"{'I-block-count (D)':<31}"
+                f"{path_text(result.original_candidate):<10}"
+                f"q_iblock={result.q_tilde:.4f}"
+            )
+
+    if not any_detail:
+        print("(no candidates included by any method)")
+
 
 def main() -> None:
     summary: dict[tuple[int, ...], dict[str, list[float]]] = defaultdict(
