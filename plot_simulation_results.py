@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -18,6 +19,21 @@ METHOD_LABELS = {
     "permutation_count": "Permutation-count (D!) weighted",
     "iblock_count": "I-block-count (D) weighted",
 }
+
+X_LIMITS = (0.48, 1.02)
+Y_LIMITS = (-0.02, 1.05)
+Y_TICKS = np.linspace(0.0, 1.0, 6)
+
+
+def finish_probability_axis(ax, ylabel: str) -> None:
+    """Use padded probability axes so markers at 0 or 1 are not clipped."""
+    ax.set_xlabel("Target coverage (1 - alpha)")
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(*X_LIMITS)
+    ax.set_ylim(*Y_LIMITS)
+    ax.set_yticks(Y_TICKS)
+    ax.legend(title="Horizon", loc="upper left", frameon=True)
+    ax.grid(True, alpha=0.3)
 
 
 def plot_reliability(
@@ -32,7 +48,7 @@ def plot_reliability(
 
     for method in sorted(case_df["method"].unique()):
         method_df = case_df[case_df["method"] == method]
-        fig, ax = plt.subplots(figsize=(6, 5))
+        fig, ax = plt.subplots(figsize=(7, 5.5))
         ax.plot([0, 1], [0, 1], color="black", linestyle="--", linewidth=1)
 
         for horizon in sorted(method_df["horizon"].unique()):
@@ -43,17 +59,16 @@ def plot_reliability(
                 horizon_df["target_coverage"],
                 horizon_df["empirical_coverage"],
                 marker="o",
+                markersize=5,
                 label=f"h={horizon}",
             )
 
-        ax.set_title(f"{simulation_name}: {METHOD_LABELS.get(method, method)}")
-        ax.set_xlabel("Target coverage (1 - alpha)")
-        ax.set_ylabel("Empirical coverage")
-        ax.set_xlim(0.45, 1.0)
-        ax.set_ylim(0.0, 1.0)
-        ax.legend(title="Horizon")
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
+        ax.set_title(
+            f"{simulation_name}: {METHOD_LABELS.get(method, method)}",
+            pad=12,
+        )
+        finish_probability_axis(ax, "Empirical coverage")
+        fig.tight_layout(pad=1.2)
 
         path = output_dir / f"{simulation_name}_reliability_{method}.png"
         fig.savefig(path, dpi=200)
@@ -76,7 +91,7 @@ def plot_scaled_set_size(
 
     for method in sorted(case_df["method"].unique()):
         method_df = case_df[case_df["method"] == method]
-        fig, ax = plt.subplots(figsize=(6, 5))
+        fig, ax = plt.subplots(figsize=(7, 5.5))
 
         for horizon in sorted(method_df["horizon"].unique()):
             horizon_df = method_df[method_df["horizon"] == horizon].sort_values(
@@ -86,17 +101,16 @@ def plot_scaled_set_size(
                 horizon_df["target_coverage"],
                 horizon_df["mean_scaled_set_size"],
                 marker="o",
+                markersize=5,
                 label=f"h={horizon}",
             )
 
-        ax.set_title(f"{simulation_name}: {METHOD_LABELS.get(method, method)}")
-        ax.set_xlabel("Target coverage (1 - alpha)")
-        ax.set_ylabel("Mean scaled set size")
-        ax.set_xlim(0.45, 1.0)
-        ax.set_ylim(0.0, 1.0)
-        ax.legend(title="Horizon")
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
+        ax.set_title(
+            f"{simulation_name}: {METHOD_LABELS.get(method, method)}",
+            pad=12,
+        )
+        finish_probability_axis(ax, "Mean scaled set size")
+        fig.tight_layout(pad=1.2)
 
         path = output_dir / f"{simulation_name}_scaled_set_size_{method}.png"
         fig.savefig(path, dpi=200)
