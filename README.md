@@ -12,10 +12,15 @@ markov-cp-iblock/
 ├── markov_cp_routines.py
 ├── quick_meeting_demo.py
 ├── run_demo.py
+├── simulation_study.py
+├── plot_simulation_results.py
 ├── emmett_tests.py
 ├── requirements.txt
+├── simulation_results/
+│   └── .gitkeep
 └── tests/
-    └── test_markov_cp.py
+    ├── test_markov_cp.py
+    └── test_simulation_study.py
 ```
 
 `markov_cp_routines.py` contains reusable mathematical routines only. It has no
@@ -27,6 +32,12 @@ wrapper.
 
 `run_demo.py` is the more detailed diagnostic script. It runs the four fixed
 history cases and both horizons requested for comparing the methods.
+
+`simulation_study.py` runs empirical coverage and prediction-set-size
+simulations for dense three-state Markov chains.
+
+`plot_simulation_results.py` reads simulation summary CSV files and creates
+reliability curves and scaled set-size plots.
 
 `emmett_tests.py` is an advisor-added scratch/testing script and is preserved.
 
@@ -242,13 +253,119 @@ RANDOM_SEEDS = range(1, 4)
 
 Set `RUN_REPEATED_SEEDS = True` when you want the repeated-run summaries.
 
+## Simulation Study
+
+The simulation study estimates empirical coverage by generating a Markov chain
+of length `T + h`, using the first `T` states as the training history, and then
+checking whether the true future path `X_{T+1:T+h}` is included in the final CP
+set.
+
+The main default case is the dense three-state chain:
+
+```python
+P_SIM1 = [
+    [0.7, 0.15, 0.15],
+    [0.3, 0.6, 0.1],
+    [0.2, 0.2, 0.6],
+]
+PI_SIM1 = [0.4, 0.3, 0.3]
+```
+
+The CP code still uses dense adjacency, not the transition probability matrix:
+
+```python
+ADJACENCY = np.ones((3, 3), dtype=int)
+```
+
+The simulation compares:
+
+1. `original`: original i-block CP.
+2. `permutation_count`: the old D!-weighted auxiliary method.
+3. `iblock_count`: the new D-weighted auxiliary method.
+
+For each method, horizon, and alpha, the summary reports:
+
+- empirical coverage
+- Monte Carlo standard error for coverage
+- mean prediction-set size
+- mean scaled set size, where the set size is divided by `3**h`
+
+Run a fast smoke test first:
+
+```bash
+python simulation_study.py --quick
+```
+
+Run the main Sim 1 study:
+
+```bash
+python simulation_study.py --sim sim1 --n-sim 500 --T 500
+```
+
+Optional stress-test cases are available:
+
+```bash
+python simulation_study.py --sim sim2 --n-sim 500 --T 500
+python simulation_study.py --sim sim3 --n-sim 500 --T 500
+python simulation_study.py --sim all --n-sim 500 --T 500
+```
+
+Raw replicate-level output is saved as:
+
+```text
+simulation_results/{simulation_name}_raw_results.csv
+```
+
+Summary output is saved as:
+
+```text
+simulation_results/{simulation_name}_summary.csv
+simulation_results/all_summary.csv
+```
+
+Create reliability and set-size plots with:
+
+```bash
+python plot_simulation_results.py --summary simulation_results/sim1_summary.csv
+```
+
+The reliability plots use target coverage `1 - alpha` on the x-axis and
+empirical coverage on the y-axis, with a diagonal reference line. The set-size
+plots use target coverage on the x-axis and mean scaled set size on the y-axis.
+
+The plots are saved in `simulation_results/`, for example:
+
+```text
+simulation_results/sim1_reliability_original.png
+simulation_results/sim1_reliability_permutation_count.png
+simulation_results/sim1_reliability_iblock_count.png
+simulation_results/sim1_scaled_set_size_original.png
+simulation_results/sim1_scaled_set_size_permutation_count.png
+simulation_results/sim1_scaled_set_size_iblock_count.png
+```
+
+For a fair comparison, the simulation computes the auxiliary p-values once per
+history and horizon. The D!-weighted and D-weighted methods then aggregate the
+same auxiliary rows, so they use the same values of `p_block(y,u)`.
+
+This simulation study is empirical. It does not prove finite-sample validity
+for either weighted auxiliary aggregate.
+
 ## Tests
 
 Run:
 
 ```bash
-python -m py_compile markov_cp_routines.py run_demo.py quick_meeting_demo.py emmett_tests.py
+python -m py_compile \
+    markov_cp_routines.py \
+    run_demo.py \
+    quick_meeting_demo.py \
+    simulation_study.py \
+    plot_simulation_results.py \
+    emmett_tests.py
 python -m unittest discover -s tests
+python simulation_study.py --quick
+python plot_simulation_results.py --summary simulation_results/sim1_summary.csv
 python quick_meeting_demo.py
 python run_demo.py
 git diff --check
@@ -258,4 +375,6 @@ The tests cover adjacency validation, candidate enumeration, i-block
 decomposition, indexed block-order permutations, factorial cardinalities,
 tie-handling modes, D! weights, D weights, shared-row aggregation, p-value
 ranges, `q_tilde` ranges, seed reproducibility, public signatures without
-`random_seed`, final prediction-set path lengths, and successful demo execution.
+`random_seed`, final prediction-set path lengths, successful demo execution,
+Markov simulation helpers, quick simulation output, summary statistics, and
+plot creation.

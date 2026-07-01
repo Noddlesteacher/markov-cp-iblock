@@ -10,3 +10,6 @@ env/
 
 demo_outputs/*
 !demo_outputs/.gitkeep
+
+simulation_results/*
+!simulation_results/.gitkeep
