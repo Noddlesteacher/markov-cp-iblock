@@ -307,8 +307,14 @@ Optional stress-test cases are available:
 ```bash
 python simulation_study.py --sim sim2 --n-sim 500 --T 500
 python simulation_study.py --sim sim3 --n-sim 500 --T 500
+python simulation_study.py --sim sim4 --n-sim 500 --T 500
 python simulation_study.py --sim all --n-sim 500 --T 500
 ```
+
+`sim4` is a single-state, Sweden-like stress test. It starts in state 1 and
+stays in state 1, so every simulated history contains only state 1. The dense
+three-state adjacency matrix is still used by the CP routines; only the
+data-generating Markov chain is single-state.
 
 Raw replicate-level output is saved as:
 

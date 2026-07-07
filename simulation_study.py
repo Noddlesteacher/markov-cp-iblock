@@ -54,10 +54,23 @@ P_SIM3 = np.array(
 )
 PI_SIM3 = np.array([1.0, 0.0, 0.0], dtype=float)
 
+# Sweden-like stress test: the observed process stays in state 1.
+# The CP adjacency remains dense; only the data-generating chain is single-state.
+P_SIM4 = np.array(
+    [
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+    ],
+    dtype=float,
+)
+PI_SIM4 = np.array([1.0, 0.0, 0.0], dtype=float)
+
 SIMULATION_CASES = {
     "sim1": (P_SIM1, PI_SIM1),
     "sim2": (P_SIM2, PI_SIM2),
     "sim3": (P_SIM3, PI_SIM3),
+    "sim4": (P_SIM4, PI_SIM4),
 }
 
 N_SIM = 500
@@ -396,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--quick", action="store_true", help="run a tiny smoke test")
     parser.add_argument(
         "--sim",
-        choices=["sim1", "sim2", "sim3", "all"],
+        choices=["sim1", "sim2", "sim3", "sim4", "all"],
         default="sim1",
         help="which simulation case to run",
     )
@@ -431,7 +444,7 @@ def main() -> None:
         max_permutations = args.max_permutations
 
     if args.sim == "all":
-        case_names = ["sim1", "sim2", "sim3"]
+        case_names = ["sim1", "sim2", "sim3", "sim4"]
     else:
         case_names = [args.sim]
 

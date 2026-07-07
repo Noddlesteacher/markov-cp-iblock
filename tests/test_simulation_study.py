@@ -15,6 +15,7 @@ import simulation_study as sim
 class SimulationStudyTests(unittest.TestCase):
     def test_validate_transition_matrix(self):
         sim.validate_transition_matrix(sim.P_SIM1, sim.PI_SIM1)
+        sim.validate_transition_matrix(sim.P_SIM4, sim.PI_SIM4)
 
         bad_P = np.array(
             [
@@ -33,6 +34,12 @@ class SimulationStudyTests(unittest.TestCase):
 
         self.assertEqual(len(sequence), 25)
         self.assertTrue(all(state in {1, 2, 3} for state in sequence))
+
+    def test_sim4_generates_only_state_one(self):
+        rng = np.random.default_rng(123)
+        sequence = sim.simulate_markov_chain(sim.P_SIM4, sim.PI_SIM4, 25, rng)
+
+        self.assertEqual(sequence, [1] * 25)
 
     def test_quick_simulation_dataframe_and_path_lengths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
