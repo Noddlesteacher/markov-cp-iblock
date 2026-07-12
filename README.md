@@ -13,6 +13,7 @@ markov-cp-iblock/
 ├── quick_meeting_demo.py
 ├── run_demo.py
 ├── simulation_study.py
+├── run_simulation_analysis.py
 ├── plot_simulation_results.py
 ├── emmett_tests.py
 ├── requirements.txt
@@ -33,11 +34,14 @@ wrapper.
 `run_demo.py` is the more detailed diagnostic script. It runs the four fixed
 history cases and both horizons requested for comparing the methods.
 
-`simulation_study.py` runs empirical coverage and prediction-set-size
-simulations for dense three-state Markov chains.
+`simulation_study.py` generates and saves Markov-chain input sequences. It does
+not run CP and does not create plots.
 
-`plot_simulation_results.py` reads simulation summary CSV files and creates
-reliability curves and scaled set-size plots.
+`run_simulation_analysis.py` loads saved sequences, runs the CP methods, and
+saves raw and summarized output.
+
+`plot_simulation_results.py` reads saved summary CSV files and creates
+reliability figures plus raw prediction-set-size tables. It does not rerun CP.
 
 `emmett_tests.py` is an advisor-added scratch/testing script and is preserved.
 
@@ -229,7 +233,7 @@ python run_demo.py
 The detailed demo runs:
 
 1. same-state history: `[1] * 100`
-2. one fixed random history of length 100 generated with `HISTORY_SEED`
+2. one fixed Markov-chain sequence generated from `P_SIM1` and `PI_SIM1`
 3. two-cycle history: `[1, 2] * 100`
 4. three-cycle history: `[1, 2, 3] * 100`
 
@@ -253,12 +257,22 @@ RANDOM_SEEDS = range(1, 4)
 
 Set `RUN_REPEATED_SEEDS = True` when you want the repeated-run summaries.
 
-## Simulation Study
+## Canonical Simulation Workflow
 
-The simulation study estimates empirical coverage by generating a Markov chain
-of length `T + h`, using the first `T` states as the training history, and then
-checking whether the true future path `X_{T+1:T+h}` is included in the final CP
-set.
+The simulation workflow is split into three steps so that changing a plot does
+not require rerunning the expensive CP calculations.
+
+1. `simulation_study.py` generates input sequences and saves them.
+2. `run_simulation_analysis.py` loads those sequences, runs CP, and saves CSV
+   output.
+3. `plot_simulation_results.py` loads the saved CSV output and makes figures
+   and tables.
+
+For each stochastic replicate, the code generates one Markov chain of length
+`T + max(horizons)`. The first `T` states are the common training history for
+all horizons. The true futures are nested prefixes of the same realized future:
+`h=1` uses `X_{T+1}`, `h=2` uses `(X_{T+1}, X_{T+2})`, and `h=3` uses
+`(X_{T+1}, X_{T+2}, X_{T+3})`.
 
 The main default case is the dense three-state chain:
 
@@ -277,82 +291,119 @@ The CP code still uses dense adjacency, not the transition probability matrix:
 ADJACENCY = np.ones((3, 3), dtype=int)
 ```
 
-The simulation compares:
+The default simulation analysis compares:
 
 1. `original`: original i-block CP.
-2. `permutation_count`: the old D!-weighted auxiliary method.
-3. `iblock_count`: the new D-weighted auxiliary method.
+2. `iblock_count`: the D-weighted auxiliary method.
+
+The old `permutation_count` D!-weighted method remains available in the core
+code and can be included as a legacy comparison, but it is not part of the
+default figures and tables.
 
 For each method, horizon, and alpha, the summary reports:
 
 - empirical coverage
 - Monte Carlo standard error for coverage
-- mean prediction-set size
-- mean scaled set size, where the set size is divided by `3**h`
+- mean raw prediction-set size
+- standard deviation of raw prediction-set size
 
-Run a fast smoke test first:
+The target-coverage grid includes `1.00`, corresponding to `alpha = 0`.
+
+Generate quick input data:
 
 ```bash
 python simulation_study.py --quick
 ```
 
-Run the main Sim 1 study:
+Run quick CP analysis on those saved inputs:
 
 ```bash
-python simulation_study.py --sim sim1 --n-sim 500 --T 500
+python run_simulation_analysis.py \
+    --input simulation_results/input/sim1_sequences_quick.npz \
+    --quick
 ```
 
-Optional stress-test cases are available:
+Create quick figures and tables from the saved summary:
 
 ```bash
-python simulation_study.py --sim sim2 --n-sim 500 --T 500
-python simulation_study.py --sim sim3 --n-sim 500 --T 500
-python simulation_study.py --sim sim4 --n-sim 500 --T 500
-python simulation_study.py --sim all --n-sim 500 --T 500
+python plot_simulation_results.py \
+    --summary simulation_results/output/sim1_summary_quick.csv
 ```
 
-`sim4` is a single-state, Sweden-like stress test. It starts in state 1 and
-stays in state 1, so every simulated history contains only state 1. The dense
-three-state adjacency matrix is still used by the CP routines; only the
-data-generating Markov chain is single-state.
+For the full Sim 1 input generation:
+
+```bash
+python simulation_study.py \
+    --simulation sim1 \
+    --n-sim 500 \
+    --T 500 \
+    --output-dir simulation_results
+```
+
+Then run the analysis:
+
+```bash
+python run_simulation_analysis.py \
+    --input simulation_results/input/sim1_sequences.npz \
+    --max-permutations 500
+```
 
 Raw replicate-level output is saved as:
 
 ```text
-simulation_results/{simulation_name}_raw_results.csv
+simulation_results/output/sim1_raw_results.csv
 ```
 
 Summary output is saved as:
 
 ```text
-simulation_results/{simulation_name}_summary.csv
-simulation_results/all_summary.csv
+simulation_results/output/sim1_summary.csv
 ```
 
-Create reliability and set-size plots with:
+Publication-style reliability figures and raw set-size tables are saved as:
 
-```bash
-python plot_simulation_results.py --summary simulation_results/sim1_summary.csv
+```text
+simulation_results/figures/sim1_reliability.png
+simulation_results/figures/sim1_reliability.pdf
+simulation_results/tables/sim1_raw_set_size_summary.csv
+simulation_results/tables/sim1_raw_set_size_target_080.md
+simulation_results/tables/sim1_raw_set_size_target_080.tex
 ```
 
 The reliability plots use target coverage `1 - alpha` on the x-axis and
-empirical coverage on the y-axis, with a diagonal reference line. The set-size
-plots use target coverage on the x-axis and mean scaled set size on the y-axis.
+empirical coverage on the y-axis, with a diagonal reference line. The axis
+limits are fixed at 0.50 to 1.00. The set-size tables report raw prediction-set
+cardinality, not normalized or scaled size.
 
-The plots are saved in `simulation_results/`, for example:
+Case 2 in the diagnostic workflow is also generated from the same dense Markov
+transition matrix and initial distribution. It uses one sequence of length
+`T + max(horizons)`, one common training history, and nested true futures:
 
-```text
-simulation_results/sim1_reliability_original.png
-simulation_results/sim1_reliability_permutation_count.png
-simulation_results/sim1_reliability_iblock_count.png
-simulation_results/sim1_scaled_set_size_original.png
-simulation_results/sim1_scaled_set_size_permutation_count.png
-simulation_results/sim1_scaled_set_size_iblock_count.png
+```bash
+python run_simulation_analysis.py --case case2
 ```
 
-For a fair comparison, the simulation computes the auxiliary p-values once per
-history and horizon. The D!-weighted and D-weighted methods then aggregate the
-same auxiliary rows, so they use the same values of `p_block(y,u)`.
+A Sweden-style all-state-1 diagnostic is available as:
+
+```bash
+python run_simulation_analysis.py --case sweden
+```
+
+This deterministic diagnostic uses `history = [1] * T` and true future
+`(1,) * h`. It is a stress-case diagnostic, not a 500-replicate Monte Carlo
+coverage simulation.
+
+The deterministic cycle diagnostics are also available:
+
+```bash
+python run_simulation_analysis.py --case two_cycle
+python run_simulation_analysis.py --case three_cycle
+```
+
+For a fair comparison, the analysis computes the auxiliary p-values once per
+history and horizon, then thresholds the same candidate values over all alpha
+values. The D-weighted aggregate uses the same auxiliary rows across the alpha
+grid.
 
 This simulation study is empirical. It does not prove finite-sample validity
 for either weighted auxiliary aggregate.
@@ -367,11 +418,18 @@ python -m py_compile \
     run_demo.py \
     quick_meeting_demo.py \
     simulation_study.py \
+    run_simulation_analysis.py \
     plot_simulation_results.py \
     emmett_tests.py
 python -m unittest discover -s tests
 python simulation_study.py --quick
-python plot_simulation_results.py --summary simulation_results/sim1_summary.csv
+python run_simulation_analysis.py \
+    --input simulation_results/input/sim1_sequences_quick.npz \
+    --quick
+python plot_simulation_results.py \
+    --summary simulation_results/output/sim1_summary_quick.csv
+python run_simulation_analysis.py --case case2 --quick
+python run_simulation_analysis.py --case sweden --quick
 python quick_meeting_demo.py
 python run_demo.py
 git diff --check
@@ -382,5 +440,6 @@ decomposition, indexed block-order permutations, factorial cardinalities,
 tie-handling modes, D! weights, D weights, shared-row aggregation, p-value
 ranges, `q_tilde` ranges, seed reproducibility, public signatures without
 `random_seed`, final prediction-set path lengths, successful demo execution,
-Markov simulation helpers, quick simulation output, summary statistics, and
-plot creation.
+Markov simulation helpers, same-history and nested-future slicing, quick input
+generation, quick analysis output, raw set-size summaries, diagnostic cases,
+and plot/table creation from saved CSV files.

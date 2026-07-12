@@ -19,7 +19,10 @@ from markov_cp_routines import (
     auxiliary_candidate_table,
     original_iblock_table,
 )
+from simulation_study import P_SIM1, PI_SIM1, simulate_markov_chain
 
+#[1, 2, 2, 1, 1, 3, 1, 1, 1, 1, 3, 1, 2, 3, 1, 2, 2, 2, 2, 2]
+#[1, 2, 2, 1, 1, 3, 1, 1, 1, 1, 3, 1, 2, 3, 1, 2, 2, 2, 2, 2]
 
 # ---------------------------------------------------------------------
 # Experiment controls
@@ -28,10 +31,10 @@ from markov_cp_routines import (
 NUM_STATES = 3
 ADJACENCY = np.ones((NUM_STATES, NUM_STATES), dtype=int)
 HORIZONS = (1, 2)
-ALPHA = 0.20
+ALPHA = 0.2
 MAX_PERMUTATIONS = 500
 
-TRAINING_LENGTH = 100
+TRAINING_LENGTH = 500
 HISTORY_SEED = 8
 DETAIL_RANDOM_SEED = 1
 RANDOM_SEEDS = range(1, 4)
@@ -45,20 +48,34 @@ def set_random_seed(seed: int) -> None:
     np.random.seed(seed)
 
 
-def make_random_history() -> list[int]:
-    """Generate one fixed random history without changing the global RNG."""
-    rng = random.Random(HISTORY_SEED)
-    return [
-        rng.randint(1, NUM_STATES)
-        for _ in range(TRAINING_LENGTH)
-    ]
+def make_markov_history() -> list[int]:
+    """Generate one fixed Markov history without changing the global RNG."""
+    rng = np.random.default_rng(HISTORY_SEED)
+    sequence = simulate_markov_chain(
+        P_SIM1,
+        PI_SIM1,
+        length=TRAINING_LENGTH + max(HORIZONS),
+        rng=rng,
+    )
+    return sequence[:TRAINING_LENGTH]
+
+
+def make_case2_full_sequence() -> list[int]:
+    """Generate the single full Markov sequence used by Case 2."""
+    rng = np.random.default_rng(HISTORY_SEED)
+    return simulate_markov_chain(
+        P_SIM1,
+        PI_SIM1,
+        length=TRAINING_LENGTH + max(HORIZONS),
+        rng=rng,
+    )
 
 
 def experiment_cases() -> list[tuple[str, list[int]]]:
     """Return the four fixed histories used in the detailed demo."""
     return [
         ("Case 1: same-state history", [1] * 100),
-        ("Case 2: fixed random history", make_random_history()),
+        ("Case 2: one simulated Markov sequence", make_markov_history()),
         ("Case 3: two-cycle history", [1, 2] * 100),
         ("Case 4: three-cycle history", [1, 2, 3] * 100),
     ]
@@ -96,6 +113,22 @@ def print_history_summary(history: list[int]) -> None:
     print(f"history length: {len(history)}")
     print(f"state counts: {dict(sorted(counts.items()))}")
     print(f"first 20 states: {history[:20]}")
+
+
+def print_case2_markov_diagnostic() -> None:
+    """Print how the Case 2 Markov history and nested futures were built."""
+    sequence = make_case2_full_sequence()
+    history = sequence[:TRAINING_LENGTH]
+    print("Case 2 Markov data-generating setup:")
+    print(f"P = {P_SIM1.tolist()}")
+    print(f"pi = {PI_SIM1.tolist()}")
+    print(f"history seed = {HISTORY_SEED}")
+    print(f"training length = {TRAINING_LENGTH}")
+    print(f"final 10 training states: {history[-10:]}")
+    print("Same training history for all displayed horizons: True")
+    for future_horizon in HORIZONS:
+        future = tuple(sequence[TRAINING_LENGTH : TRAINING_LENGTH + future_horizon])
+        print(f"true future for h={future_horizon}: {path_text(future)}")
 
 
 def print_original_table(rows: list[IBlockDiagnostic]) -> None:
@@ -248,6 +281,8 @@ def run_detailed_case(case_name: str, history: list[int], horizon: int) -> None:
     print(f"{case_name}; horizon={horizon}; detail seed={DETAIL_RANDOM_SEED}")
     print("=" * 100)
     print_history_summary(history)
+    if case_name.startswith("Case 2"):
+        print_case2_markov_diagnostic()
 
     set_random_seed(DETAIL_RANDOM_SEED)
     original_rows = original_iblock_table(
